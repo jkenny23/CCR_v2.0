@@ -35,3 +35,6 @@ This code is intended for the version 2.0 hardware, with the following hardware 
 //Pin definitions - Digital inputs
 #define S1 PB9 //Switch 1
 #define S2 PC13 //Switch 2
+
+Library dependencies:
+Adafruit_NeoPixel-ANDnXOR.h - modified for inverted logic, since CCR v2.x has an N-FET to level shift the MCU 3.3V to 5V logic for the WS2812B.
