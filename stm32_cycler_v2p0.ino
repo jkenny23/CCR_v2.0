@@ -28,7 +28,7 @@
 
 volatile int interruptCounter;
 
-const char vers[] = "2.0-03112019"; 
+const char vers[] = "2.0-04052019"; 
 
 #define AFTERDISWAIT 300//300 //300s after charging wait time
 #define AFTERCHGWAIT 60//60 //60s after charging wait time
@@ -82,7 +82,12 @@ volatile uint8 discharge_mode_2 = 0;
 volatile uint8 psu_dir_2 = 0;
 volatile uint8 tm_duty_2 = 0;
 
-#define REFAVAL 2037325.6f //Board 2: Real ref voltage = 1.6425 (on), 1.6403 (off). Value = ADC val with 3.3V*1000 (board 1)
+//Initialize reference voltage with default until read out of EEPROM
+#define REFAVALINIT 313.763f
+volatile float REFAVAL = REFAVALINIT;
+//EEPROM address for reference value: 0
+#define REFAVALADDR 0
+//#define REFAVAL 2037325.6f //Board 2: Real ref voltage = 1.6425 (on), 1.6403 (off). Value = ADC val with 3.3V*1000 (board 1)
 //#define REFAVAL 2059481.2f //Board 2: Real ref voltage = 1.68 (on), 1.6385 (off). Value = ADC val with 3.3V*1000 (board 2)
 //Original ADC2I = 620.606
 //Original ADC2V = 846.281
@@ -574,6 +579,7 @@ void setLED2(unsigned char color) {
 
 void setup() {
   int i = 0;
+  unsigned short int wData = 0, estatus = 0;
   
   setChg1(DISCONNECT);
   setChg2(DISCONNECT);
@@ -634,6 +640,23 @@ void setup() {
     display.setTextSize(1);
     display.setTextColor(WHITE);
     display.display();*/
+  
+  Serial.print("> Initializing EEPROM, return value: ");
+  Serial.println(EEPROM.init(), HEX);
+  
+  Serial.println("> Initializing calibration from EEPROM");
+  estatus = EEPROM.read(REFAVALADDR, &wData);
+  if(estatus == 0)
+  {
+    Serial.print("> Reference cal. value found: 1.");
+    Serial.print(wData);
+    Serial.println("V");
+    REFAVAL = (10000.0+(float)wData)*124.1212;
+  }
+  else
+  {
+    Serial.println("> Reference cal. value not found, using default.");
+  }
 
   Serial.println("> Initializing reference...");
   adciref = 0;
@@ -642,7 +665,7 @@ void setup() {
     adciref += analogRead(AIREF); //Iref voltage
     //Serial.println(adciref);
   }
-  Serial.print("ADC correction factor: ");
+  Serial.print("> ADC correction factor: ");
   corr_factor = (REFAVAL/((float)adciref));
   Serial.print(corr_factor*100);
   Serial.print(" ");
@@ -654,10 +677,11 @@ void setup() {
   Serial.println(ADC2V1);
   ADC2V2 = ADC2V2/corr_factor;
   
-  Serial.print("Software version: ");
+  Serial.print("> Software version: ");
   Serial.println(vers);
-  printMenu(mode1);
   adciref = (uint32)((float)adciref/1000.0); //Iref voltage
+  
+  printMenu(mode1);
   
   Timer2.resume(); //Start the timer counting
 }
@@ -823,7 +847,7 @@ void printMenu(uint8 menu2)
       Serial.print("\r\n");
       Serial.print("> ");
       break;
-    case 5:
+    case 6:
       Serial.print("\r\n");
       Serial.println("> Currently in IR Test Mode");
       Serial.println(">  Press n to end");
@@ -2775,6 +2799,7 @@ void loop() {
           s = Status
   */
   uint8 i = 0;
+  uint16 estatus = 0, wAddress = 0, wData = 0;
   char *args[8];
   recvWithStartEndMarkers();
   if (newData == true)
@@ -3037,10 +3062,51 @@ void loop() {
         }
         break;
       case 't':
-        mode1 = 4;
-        parseTM1(i, args);
-        //Currently disabled
-        //Timer2.resume(); //Start the timer counting
+        if(args[0][1] == 'w')
+        {
+          mode1 = 6;
+          Serial.println("\r\n> Writing EEPROM: ");
+          //aXXX = address in dec.
+          wAddress = fast_atoi_leading_pos(args[1]);
+          //dXXX = data in dec.
+          wData = fast_atoi_leading_pos(args[2]);
+          Serial.print("> Address 0x");
+          Serial.print(wAddress, HEX);
+          Serial.print(", Data = dec. ");
+          Serial.println(wData);
+          estatus = EEPROM.write(wAddress, wData);
+          if(estatus == 0)
+          {
+            Serial.print("> Write finished, Status: ");
+            Serial.println(estatus, HEX);
+          }
+          else
+          {
+            Serial.print("> EEPROM error, code: ");
+            Serial.println(estatus, HEX);
+          }
+        }
+        else if(args[0][1] == 'r')
+        {
+          mode1 = 6;
+          Serial.println("\r\n> Reading EEPROM: ");
+          wAddress = fast_atoi_leading_pos(args[1]);
+          Serial.print("> Address 0x");
+          Serial.print(wAddress, HEX);
+          estatus = EEPROM.read(wAddress, &wData);
+          Serial.print(", Data = dec. ");
+          Serial.println(wData);
+          if(estatus == 0)
+          {
+            Serial.print("> Read finished, Status: ");
+            Serial.println(estatus, HEX);
+          }
+          else
+          {
+            Serial.print("> EEPROM error, code: ");
+            Serial.println(estatus, HEX);
+          }
+        }
         break;
       case 'l': //Calibration mode/update
         updateADCRef();
