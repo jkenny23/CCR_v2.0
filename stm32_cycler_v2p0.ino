@@ -94,11 +94,20 @@ volatile float REFAVAL = REFAVALINIT;
 //Voltage reported / Voltage real * ADC2VxINIT orig = ADC2VxINIT new
 //Voltage reads high => increase ADC2V value
 //Current reads high => increase ADC2I value
-//Board 1
+//EEPROM address for slot 1 voltage value: 1
+#define ADC2V1ADDR 1
+#define ADC2V1INIT 846.281f
+//EEPROM address for slot 2 voltage value: 2
+#define ADC2V2ADDR 2
+#define ADC2V2INIT 846.281f
+//todo: reset adc2v2init during "l" calibration for storing correction factors
 #define ADC2I1INIT 313.763f
+#define ADC2I2INIT 323.219f
+//Board 1
+/*#define ADC2I1INIT 313.763f
 #define ADC2V1INIT 843.332f
 #define ADC2I2INIT 323.219f
-#define ADC2V2INIT 844.267f
+#define ADC2V2INIT 844.267f*/
 //Board 2
 /*#define ADC2I1INIT 318.608f
 #define ADC2V1INIT 839.542f
@@ -656,6 +665,32 @@ void setup() {
   else
   {
     Serial.println("> Reference cal. value not found, using default.");
+  }
+  estatus = EEPROM.read(ADC2V1ADDR, &wData);
+  if(estatus == 0)
+  {
+    Serial.print("> Slot 1 voltage cal. value found: ");
+    Serial.print(wData);
+    Serial.println("mV");
+    //Voltage reported / Voltage real * ADC2VxINIT orig = ADC2VxINIT new
+    ADC2V1 = ADC2V1 * 4200.0/((float)wData);
+  }
+  else
+  {
+    Serial.println("> Slot 1 voltage cal. value not found, using default.");
+  }
+  estatus = EEPROM.read(ADC2V2ADDR, &wData);
+  if(estatus == 0)
+  {
+    Serial.print("> Slot 2 voltage cal. value found: ");
+    Serial.print(wData);
+    Serial.println("mV");
+    //Voltage reported / Voltage real * ADC2VxINIT orig = ADC2VxINIT new
+    ADC2V2 = ADC2V2 * 4200.0/((float)wData);
+  }
+  else
+  {
+    Serial.println("> Slot 1 voltage cal. value not found, using default.");
   }
 
   Serial.println("> Initializing reference...");
