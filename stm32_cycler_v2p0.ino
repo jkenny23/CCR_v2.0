@@ -28,7 +28,7 @@
 
 volatile int interruptCounter;
 
-const char vers[] = "2.0-04052019"; 
+const char vers[] = "2.0-04092019"; 
 
 #define AFTERDISWAIT 300//300 //300s after charging wait time
 #define AFTERCHGWAIT 60//60 //60s after charging wait time
@@ -101,8 +101,12 @@ volatile float REFAVAL = REFAVALINIT;
 #define ADC2V2ADDR 2
 #define ADC2V2INIT 846.281f
 //todo: reset adc2v2init during "l" calibration for storing correction factors
-#define ADC2I1INIT 313.763f
-#define ADC2I2INIT 323.219f
+//EEPROM address for slot 1 current value: 3
+#define ADC2I1ADDR 3
+#define ADC2I1INIT 310.303f
+//EEPROM address for slot 2 current value: 4
+#define ADC2I2ADDR 4
+#define ADC2I2INIT 310.303f
 //Board 1
 /*#define ADC2I1INIT 313.763f
 #define ADC2V1INIT 843.332f
@@ -690,7 +694,33 @@ void setup() {
   }
   else
   {
-    Serial.println("> Slot 1 voltage cal. value not found, using default.");
+    Serial.println("> Slot 2 voltage cal. value not found, using default.");
+  }
+  estatus = EEPROM.read(ADC2I1ADDR, &wData);
+  if(estatus == 0)
+  {
+    Serial.print("> Slot 1 current cal. value found: ");
+    Serial.print(wData);
+    Serial.println("mA");
+    //Current reported / Current real * ADC2IxINIT orig = ADC2IxINIT new
+    ADC2I1 = ADC2I1 * 1000.0/((float)wData);
+  }
+  else
+  {
+    Serial.println("> Slot 1 current cal. value not found, using default.");
+  }
+  estatus = EEPROM.read(ADC2I2ADDR, &wData);
+  if(estatus == 0)
+  {
+    Serial.print("> Slot 2 current cal. value found: ");
+    Serial.print(wData);
+    Serial.println("mV");
+    //Current reported / Current real * ADC2IxINIT orig = ADC2IxINIT new
+    ADC2I2 = ADC2I2 * 1000.0/((float)wData);
+  }
+  else
+  {
+    Serial.println("> Slot 2 current cal. value not found, using default.");
   }
 
   Serial.println("> Initializing reference...");
@@ -3145,9 +3175,13 @@ void loop() {
         break;
       case 'l': //Calibration mode/update
         updateADCRef();
+        ADC2V1 = ADC2V1INIT;
+        ADC2V2 = ADC2V2INIT;
+        ADC2I1 = ADC2I1INIT;
+        ADC2I2 = ADC2I2INIT;
         mode1 = 3;
         charge_voltage_1 = DEF_CHG_VOL;
-        charge_current_1 = DEF_CHG_CUR;
+        charge_current_1 = 1000;
         psu_dir_1 = DEF_PSU_MODE;
         state1 = 3;
         settle1 = 0;
@@ -3158,7 +3192,7 @@ void loop() {
         setLED1(CYAN);
         mode2 = 3;
         charge_voltage_2 = DEF_CHG_VOL;
-        charge_current_2 = DEF_CHG_CUR;
+        charge_current_2 = 1000;
         psu_dir_2 = DEF_PSU_MODE;
         state2 = 3;
         settle2 = 0;
@@ -3169,9 +3203,10 @@ void loop() {
         setLED2(CYAN);
         Serial.print("\r\n");
         Serial.println("> Currently in Calibration Mode");
+        Serial.println("> Slot 1/2 corrections reset to default");
         Serial.print(">  ADC correction factor: ");
         Serial.print(corr_factor*100);
-        Serial.println(" Slot 1+2 set to 4.20V");
+        Serial.println(" Slot 1+2 set to 4.20V, 1.0A");
         Serial.println(">  Press n1, n2 to end");
         Serial.print("\r\n");
         Serial.print("> ");
