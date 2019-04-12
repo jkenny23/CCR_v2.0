@@ -45,14 +45,14 @@ const char vers[] = "2.0-04092019";
 #define BLUE 5
 #define PURPLE 6
 #define WHITE 7
-#define MAX_CHG_CUR -6000
+#define MAX_CHG_CUR -10000
 #define MAX_CHG_VOL 4500
 #define MIN_CCC 10
-#define MAX_DIS_CUR 6000
+#define MAX_DIS_CUR 10000
 #define MIN_DIS_VOL 1000
 #define MAX_DIS_VOL 4300
-#define MINBUCKDUTY 0
-#define MAXBUCKDUTY 399
+#define MINBUCKDUTY 1
+#define MAXBUCKDUTY 397
 #define DEF_CHG_CUR -1500
 #define DEF_CHG_VOL 4200
 #define DEF_CCC 50
@@ -71,7 +71,7 @@ volatile uint16 ccc_1 = 50; //Charge CC cutoff in mA (50mA)
 volatile uint16 num_cycles_1 = 1;
 volatile uint8 discharge_mode_1 = 0;
 volatile uint8 psu_dir_1 = 0;
-volatile uint8 tm_duty_1 = 0;
+volatile uint16 tm_duty_1 = 0;
 volatile int16 charge_current_2 = -1500;
 volatile uint16 charge_voltage_2 = 4200;
 volatile uint16 discharge_current_2 = 1500;
@@ -80,10 +80,14 @@ volatile uint16 ccc_2 = 50; //Charge CC cutoff in mA (50mA)
 volatile uint16 num_cycles_2 = 1;
 volatile uint8 discharge_mode_2 = 0;
 volatile uint8 psu_dir_2 = 0;
-volatile uint8 tm_duty_2 = 0;
+volatile uint16 tm_duty_2 = 0;
+volatile uint8 slot1_startup = 0;
+volatile uint8 slot2_startup = 0;
+
+#define STARTUP_CYCLES 2 //number of cycles-1 (0.25ms each) to delay before turning on cell
 
 //Initialize reference voltage with default until read out of EEPROM
-#define REFAVALINIT 313.763f
+#define REFAVALINIT 2048000.0f
 volatile float REFAVAL = REFAVALINIT;
 //EEPROM address for reference value: 0
 #define REFAVALADDR 0
@@ -96,10 +100,10 @@ volatile float REFAVAL = REFAVALINIT;
 //Current reads high => increase ADC2I value
 //EEPROM address for slot 1 voltage value: 1
 #define ADC2V1ADDR 1
-#define ADC2V1INIT 846.281f
+#define ADC2V1INIT 842.452f
 //EEPROM address for slot 2 voltage value: 2
 #define ADC2V2ADDR 2
-#define ADC2V2INIT 846.281f
+#define ADC2V2INIT 842.452f
 //todo: reset adc2v2init during "l" calibration for storing correction factors
 //EEPROM address for slot 1 current value: 3
 #define ADC2I1ADDR 3
@@ -117,13 +121,18 @@ volatile float REFAVAL = REFAVALINIT;
 #define ADC2V1INIT 839.542f
 #define ADC2I2INIT 316.440f
 #define ADC2V2INIT 843.087f*/
-#define BUF2V 3.21496f
+//EEPROM address for buffer current value: 5
+#define BUF2VADDR 5
+#define BUF2VINIT 3.22266f //x/4096*3.3*1000*4
+volatile float BUF2V = BUF2VINIT;
 #define VR12V 1.61790f
 #define VR22V 1.61694f
 volatile float ADC2I1 = ADC2I1INIT;
 volatile float ADC2V1 = ADC2V1INIT;
 volatile float ADC2I2 = ADC2I2INIT;
 volatile float ADC2V2 = ADC2V2INIT;
+volatile unsigned int initbuckduty1 = 160;
+volatile unsigned int initbuckduty2 = 160;
 volatile float corr_factor = 1.0f;
 #define TOFFS1 0.0f
 #define TOFFS2 0.0f
@@ -140,17 +149,18 @@ volatile float corr_factor = 1.0f;
 #define AC2T PA2 //Cell 2 temperature input
 #define AC2R PA0 //Cell 2 reverse voltage input
 #define ABUFV PA4 //Buffer/input voltage input
-#define AUXSEL2 PB5 //Lo = HS thermistor #2, Hi = HS thermistor #1 or ABUFV
-#define AUXSEL1 PB2 //Lo = ABUFV, Hi = HS thermistor #1
+#define AIREF PA5 //Reference voltage input
+//Pin definitions - Digital outputs
 #define HSTH1 0
 #define HSTH2 1
 #define BUFV 2
-#define AIREF PA5 //Reference voltage input
-//Pin definitions - Digital outputs
-#define OC1NF1 PA8 //Boost NFET output
-#define OC1PF PA9 //Buck PFET output
-#define OC2NF1 PA10 //Boost NFET output
-#define OC2PF PB8 //Buck PFET output
+//CCR v2.2 HW configuration:
+#define AUXSEL2 PB5 //Lo = HS thermistor #2, Hi = HS thermistor #1 or ABUFV
+#define AUXSEL1 PB12 //Lo = ABUFV, Hi = HS thermistor #1
+#define OC1PF PA8 //Buck FET control output, positive logic; higher PWM duty = higher output voltage
+#define OC1ON PA9 //Buck disable, active low (0 = buck disabled)
+#define OC2PF PB10 //Buck FET control output, positive logic; higher PWM duty = higher output voltage
+#define OC2ON PB8 //Buck disable, active low (0 = buck disabled)
 #define OC1NF2 PB6 //CC 1 setting output
 #define OC2NF2 PB7 //CC 2 setting output
 #define C1DOFF PB15 //CC 1 disable output
@@ -162,6 +172,24 @@ volatile float corr_factor = 1.0f;
 //Pin definitions - Digital inputs
 #define S1 PB9 //Switch 1
 #define S2 PC13 //Switch 2
+/*//CCR v2.0 HW configuration:
+#define AUXSEL2 PB5 //Lo = HS thermistor #2, Hi = HS thermistor #1 or ABUFV
+#define AUXSEL1 PB2 //Lo = ABUFV, Hi = HS thermistor #1
+#define OC1NF1 PA8 //Boost NFET output
+#define OC1PF PA9 //Buck PFET output, negative logic; lower PWM duty = higher output voltage
+#define OC2NF1 PA10 //Boost NFET output
+#define OC2PF PB8 //Buck PFET output, negative logic; lower PWM duty = higher output voltage
+#define OC1NF2 PB6 //CC 1 setting output
+#define OC2NF2 PB7 //CC 2 setting output
+#define C1DOFF PB15 //CC 1 disable output
+#define C2DOFF PA15 //CC 2 disable output
+#define C1ON PB14 //Cell 1 protection bypass
+#define C2ON PB3 //Cell 2 protection bypass
+#define FANON PB4 //Fan control output
+#define WSDI PB13 //LED control pin, inverted logic
+//Pin definitions - Digital inputs
+#define S1 PB9 //Switch 1
+#define S2 PC13 //Switch 2*/
 
 Adafruit_NeoPixel leds = Adafruit_NeoPixel(2, WSDI, NEO_GRB + NEO_KHZ800);
 
@@ -302,35 +330,38 @@ void setChg1(unsigned char state) {
       #define OC1NF2 PB6 //CC setting
       #define C1DOFF PB15*/
     case DISCONNECT:
-      pinMode(OC1NF1, OUTPUT);
-      digitalWrite(OC1NF1, LOW);
+      pinMode(OC1ON, OUTPUT);
+      digitalWrite(OC1ON, LOW);
+      pinMode(OC1PF, OUTPUT);
+      digitalWrite(OC1PF, LOW);
       pinMode(OC1NF2, OUTPUT);
       digitalWrite(OC1NF2, LOW);
       pinMode(C1DOFF, OUTPUT);
       digitalWrite(C1DOFF, HIGH);
-      pinMode(OC1PF, OUTPUT);
-      digitalWrite(OC1PF, HIGH); //Non-inverting mode
       //pinMode(FANON, OUTPUT);
       //digitalWrite(FANON, LOW); //Non-inverting mode
       break;
     case CHARGE:
-      pinMode(OC1NF1, OUTPUT);
-      digitalWrite(OC1NF1, LOW);
       pinMode(OC1NF2, OUTPUT);
       digitalWrite(OC1NF2, LOW);
       pinMode(C1DOFF, OUTPUT);
       digitalWrite(C1DOFF, HIGH); //Inverting
-      duty1 = MAXBUCKDUTY;
+      presetDuty1();
+      duty1 = initbuckduty1; //Assume 3.7V initial cell voltage - optimise later
       pinMode(OC1PF, PWM);
       pwmWrite(OC1PF, duty1);
+      pinMode(OC1ON, OUTPUT);
+      digitalWrite(OC1ON, HIGH);
+      slot1_startup = STARTUP_CYCLES;
+      digitalWrite(C1ON, HIGH); //override cell protection FET off until synchronous buck is started
       //pinMode(FANON, OUTPUT);
       //digitalWrite(FANON, LOW); //Non-inverting mode
       break;
     case DISCHARGE:
+      pinMode(OC1ON, OUTPUT);
+      digitalWrite(OC1ON, LOW);
       pinMode(OC1PF, OUTPUT);
-      digitalWrite(OC1PF, HIGH); //Non-inverting mode
-      pinMode(OC1NF1, OUTPUT);
-      digitalWrite(OC1NF1, LOW);
+      digitalWrite(OC1PF, LOW); //Non-inverting mode
       duty1 = 0;
       pinMode(OC1NF2, PWM);
       pwmWrite(OC1NF2, duty1);
@@ -340,26 +371,29 @@ void setChg1(unsigned char state) {
       //digitalWrite(FANON, HIGH); //Non-inverting mode
       break;
     case REGEN:
-      pinMode(OC1PF, OUTPUT);
-      digitalWrite(OC1PF, HIGH); //Non-inverting mode
       pinMode(OC1NF2, OUTPUT);
       digitalWrite(OC1NF2, LOW);
       pinMode(C1DOFF, OUTPUT);
-      digitalWrite(C1DOFF, HIGH); //Non-inverting mode
+      digitalWrite(C1DOFF, HIGH); //Inverting
+      presetDuty1();
+      duty1 = initbuckduty1; //Assume 3.7V initial cell voltage - optimise later
+      pinMode(OC1PF, PWM);
+      pwmWrite(OC1PF, duty1);
+      pinMode(OC1ON, OUTPUT);
+      digitalWrite(OC1ON, HIGH);
+      slot1_startup = STARTUP_CYCLES;
+      digitalWrite(C1ON, HIGH); //override cell protection FET off until synchronous buck is started
       //pinMode(FANON, OUTPUT);
       //digitalWrite(FANON, LOW); //Non-inverting mode
-      duty1 = 0;
-      pinMode(OC1NF1, PWM);
-      pwmWrite(OC1NF1, duty1);
     default:
-      pinMode(OC1NF1, OUTPUT);
-      digitalWrite(OC1NF1, LOW);
+      pinMode(OC1ON, OUTPUT);
+      digitalWrite(OC1ON, LOW);
+      pinMode(OC1PF, OUTPUT);
+      digitalWrite(OC1PF, LOW);
       pinMode(OC1NF2, OUTPUT);
       digitalWrite(OC1NF2, LOW);
       pinMode(C1DOFF, OUTPUT);
       digitalWrite(C1DOFF, HIGH);
-      pinMode(OC1PF, OUTPUT);
-      digitalWrite(OC1PF, HIGH); //Non-inverting mode
       //pinMode(FANON, OUTPUT);
       //digitalWrite(FANON, LOW); //Non-inverting mode
       break;
@@ -374,35 +408,38 @@ void setChg2(unsigned char state) {
       #define OC2NF2 PB7 //CC setting
       #define C2DOFF PA15*/
     case DISCONNECT:
-      pinMode(OC2NF1, OUTPUT);
-      digitalWrite(OC2NF1, LOW);
+      pinMode(OC2ON, OUTPUT);
+      digitalWrite(OC2ON, LOW);
+      pinMode(OC2PF, OUTPUT);
+      digitalWrite(OC2PF, LOW);
       pinMode(OC2NF2, OUTPUT);
       digitalWrite(OC2NF2, LOW);
       pinMode(C2DOFF, OUTPUT);
       digitalWrite(C2DOFF, HIGH);
-      pinMode(OC2PF, OUTPUT);
-      digitalWrite(OC2PF, HIGH); //Non-inverting mode
       //pinMode(FANON, OUTPUT);
       //digitalWrite(FANON, LOW); //Non-inverting mode
       break;
     case CHARGE:
-      pinMode(OC2NF1, OUTPUT);
-      digitalWrite(OC2NF1, LOW);
       pinMode(OC2NF2, OUTPUT);
       digitalWrite(OC2NF2, LOW);
       pinMode(C2DOFF, OUTPUT);
       digitalWrite(C2DOFF, HIGH); //Inverting
-      duty2 = MAXBUCKDUTY;
+      presetDuty2();
+      duty2 = initbuckduty2; //Assume 3.7V initial cell voltage - optimise later
       pinMode(OC2PF, PWM);
       pwmWrite(OC2PF, duty1);
+      pinMode(OC2ON, OUTPUT);
+      digitalWrite(OC2ON, HIGH);
+      slot2_startup = STARTUP_CYCLES;
+      digitalWrite(C2ON, HIGH); //override cell protection FET off until synchronous buck is started
       //pinMode(FANON, OUTPUT);
       //digitalWrite(FANON, LOW); //Non-inverting mode
       break;
     case DISCHARGE:
+      pinMode(OC2ON, OUTPUT);
+      digitalWrite(OC2ON, LOW);
       pinMode(OC2PF, OUTPUT);
-      digitalWrite(OC2PF, HIGH); //Non-inverting mode
-      pinMode(OC2NF1, OUTPUT);
-      digitalWrite(OC2NF1, LOW);
+      digitalWrite(OC2PF, LOW); //Non-inverting mode
       duty2 = 0;
       pinMode(OC2NF2, PWM);
       pwmWrite(OC2NF2, duty1);
@@ -412,30 +449,63 @@ void setChg2(unsigned char state) {
       //digitalWrite(FANON, HIGH); //Non-inverting mode
       break;
     case REGEN:
-      pinMode(OC2PF, OUTPUT);
-      digitalWrite(OC2PF, HIGH); //Non-inverting mode
       pinMode(OC2NF2, OUTPUT);
       digitalWrite(OC2NF2, LOW);
       pinMode(C2DOFF, OUTPUT);
-      digitalWrite(C2DOFF, HIGH); //Non-inverting mode
+      digitalWrite(C2DOFF, HIGH); //Inverting
+      presetDuty2();
+      duty2 = initbuckduty2; //Assume 3.7V initial cell voltage - optimise later
+      pinMode(OC2PF, PWM);
+      pwmWrite(OC2PF, duty1);
+      pinMode(OC2ON, OUTPUT);
+      digitalWrite(OC2ON, HIGH);
+      slot2_startup = STARTUP_CYCLES;
+      digitalWrite(C2ON, HIGH); //override cell protection FET off until synchronous buck is started
       //pinMode(FANON, OUTPUT);
       //digitalWrite(FANON, LOW); //Non-inverting mode
-      duty2 = 0;
-      pinMode(OC2NF1, PWM);
-      pwmWrite(OC2NF1, duty1);
     default:
-      pinMode(OC2NF1, OUTPUT);
-      digitalWrite(OC2NF1, LOW);
+      pinMode(OC2ON, OUTPUT);
+      digitalWrite(OC2ON, LOW);
+      pinMode(OC2PF, OUTPUT);
+      digitalWrite(OC2PF, LOW);
       pinMode(OC2NF2, OUTPUT);
       digitalWrite(OC2NF2, LOW);
       pinMode(C2DOFF, OUTPUT);
       digitalWrite(C2DOFF, HIGH);
-      pinMode(OC2PF, OUTPUT);
-      digitalWrite(OC2PF, HIGH); //Non-inverting mode
       //pinMode(FANON, OUTPUT);
       //digitalWrite(FANON, LOW); //Non-inverting mode
       break;
   }
+}
+
+void presetDuty1(void)
+{
+  unsigned int inputV;
+  unsigned int cellV;
+  
+  inputV = (int)(((float)getAuxADC(BUFV)) * BUF2V);
+  //Convert ADC value to value in Volts
+  cellV = (int)((((float)analogRead(AC1V)) / ADC2V1) * 1000 + 0.5); //Multiply by 1000 for mV, round
+  initbuckduty1 = (int)((float)cellV/(float)inputV*399);
+  if(initbuckduty1 < MINBUCKDUTY)
+    initbuckduty1 = MINBUCKDUTY;
+  else if(initbuckduty1 > MAXBUCKDUTY)
+    initbuckduty1 = MAXBUCKDUTY;
+}
+
+void presetDuty2(void)
+{
+  unsigned int inputV;
+  unsigned int cellV;
+  
+  inputV = (int)(((float)getAuxADC(BUFV)) * BUF2V);
+  //Convert ADC value to value in Volts
+  cellV = (int)((((float)analogRead(AC2V)) / ADC2V2) * 1000 + 0.5); //Multiply by 1000 for mV, round
+  initbuckduty2 = (int)((float)cellV/(float)inputV*399);
+  if(initbuckduty2 < MINBUCKDUTY)
+    initbuckduty2 = MINBUCKDUTY;
+  else if(initbuckduty2 > MAXBUCKDUTY)
+    initbuckduty2 = MAXBUCKDUTY;
 }
 
 void setLED1(unsigned char color) {
@@ -622,14 +692,14 @@ void setup() {
   Timer1.pause();
   //timer.setChannel1Mode(TIMER_OUTPUT_COMPARE);
   Timer1.setPrescaleFactor(1);
-  Timer1.setOverflow(MAXBUCKDUTY);
+  Timer1.setOverflow(400);
   Timer1.refresh();
   Timer1.resume();
 
   Timer4.pause();
   //timer.setChannel1Mode(TIMER_OUTPUT_COMPARE);
   Timer4.setPrescaleFactor(1);
-  Timer4.setOverflow(MAXBUCKDUTY);
+  Timer4.setOverflow(400);
   Timer4.refresh();
   Timer4.resume();
 
@@ -653,18 +723,29 @@ void setup() {
     display.setTextSize(1);
     display.setTextColor(WHITE);
     display.display();*/
+
+  estatus = EEPROM.init();
+  if(estatus != 0)
+  {
+    Serial.print("> EEPROM init error, return value: ");
+    Serial.println(estatus, HEX);
+  }
   
-  Serial.print("> Initializing EEPROM, return value: ");
-  Serial.println(EEPROM.init(), HEX);
-  
-  Serial.println("> Initializing calibration from EEPROM");
+  Serial.println("> Initializing cal. from EEPROM");
   estatus = EEPROM.read(REFAVALADDR, &wData);
   if(estatus == 0)
   {
-    Serial.print("> Reference cal. value found: 1.");
-    Serial.print(wData);
-    Serial.println("V");
-    REFAVAL = (10000.0+(float)wData)*124.1212;
+    if(wData > 6800 || wData < 6200)
+    {
+      Serial.println("> Reference cal. out of range, using default.");
+    }
+    else
+    {
+      Serial.print("> Reference cal. value found: 1.");
+      Serial.print(wData);
+      Serial.println("V");
+      REFAVAL = (10000.0+(float)wData)*124.1212;
+    }
   }
   else
   {
@@ -673,11 +754,18 @@ void setup() {
   estatus = EEPROM.read(ADC2V1ADDR, &wData);
   if(estatus == 0)
   {
-    Serial.print("> Slot 1 voltage cal. value found: ");
-    Serial.print(wData);
-    Serial.println("mV");
-    //Voltage reported / Voltage real * ADC2VxINIT orig = ADC2VxINIT new
-    ADC2V1 = ADC2V1 * 4200.0/((float)wData);
+    if(wData > 4600 || wData < 3800)
+    {
+      Serial.println("> Slot 1 voltage cal. out of range, using default.");
+    }
+    else
+    {
+      Serial.print("> Slot 1 voltage cal. value found: ");
+      Serial.print(wData);
+      Serial.println("mV");
+      //Voltage reported / Voltage real * ADC2VxINIT orig = ADC2VxINIT new
+      ADC2V1 = ADC2V1 * 4200.0/((float)wData);
+    }
   }
   else
   {
@@ -686,11 +774,18 @@ void setup() {
   estatus = EEPROM.read(ADC2V2ADDR, &wData);
   if(estatus == 0)
   {
-    Serial.print("> Slot 2 voltage cal. value found: ");
-    Serial.print(wData);
-    Serial.println("mV");
-    //Voltage reported / Voltage real * ADC2VxINIT orig = ADC2VxINIT new
-    ADC2V2 = ADC2V2 * 4200.0/((float)wData);
+    if(wData > 4600 || wData < 3800)
+    {
+      Serial.println("> Slot 2 voltage cal. out of range, using default.");
+    }
+    else
+    {
+      Serial.print("> Slot 2 voltage cal. value found: ");
+      Serial.print(wData);
+      Serial.println("mV");
+      //Voltage reported / Voltage real * ADC2VxINIT orig = ADC2VxINIT new
+      ADC2V2 = ADC2V2 * 4200.0/((float)wData);
+    }
   }
   else
   {
@@ -699,11 +794,18 @@ void setup() {
   estatus = EEPROM.read(ADC2I1ADDR, &wData);
   if(estatus == 0)
   {
-    Serial.print("> Slot 1 current cal. value found: ");
-    Serial.print(wData);
-    Serial.println("mA");
-    //Current reported / Current real * ADC2IxINIT orig = ADC2IxINIT new
-    ADC2I1 = ADC2I1 * 1000.0/((float)wData);
+    if(wData > 1200 || wData < 800)
+    {
+      Serial.println("> Slot 1 current cal. out of range, using default.");
+    }
+    else
+    {
+      Serial.print("> Slot 1 current cal. value found: ");
+      Serial.print(wData);
+      Serial.println("mA");
+      //Current reported / Current real * ADC2IxINIT orig = ADC2IxINIT new
+      ADC2I1 = ADC2I1 * 1000.0/((float)wData);
+    }
   }
   else
   {
@@ -712,15 +814,41 @@ void setup() {
   estatus = EEPROM.read(ADC2I2ADDR, &wData);
   if(estatus == 0)
   {
-    Serial.print("> Slot 2 current cal. value found: ");
-    Serial.print(wData);
-    Serial.println("mV");
-    //Current reported / Current real * ADC2IxINIT orig = ADC2IxINIT new
-    ADC2I2 = ADC2I2 * 1000.0/((float)wData);
+    if(wData > 1200 || wData < 800)
+    {
+      Serial.println("> Slot 2 current cal. out of range, using default.");
+    }
+    else
+    {
+      Serial.print("> Slot 2 current cal. value found: ");
+      Serial.print(wData);
+      Serial.println("mV");
+      //Current reported / Current real * ADC2IxINIT orig = ADC2IxINIT new
+      ADC2I2 = ADC2I2 * 1000.0/((float)wData);
+    }
   }
   else
   {
     Serial.println("> Slot 2 current cal. value not found, using default.");
+  }
+  estatus = EEPROM.read(BUF2VADDR, &wData);
+  if(estatus == 0)
+  {
+    if(wData > 6000 || wData < 4000)
+    {
+      Serial.println("> Input cal. out of range, using default.");
+    }
+    else
+    {
+      Serial.print("> Input cal. value found: ");
+      Serial.print(wData);
+      Serial.println("mV");
+      BUF2V = (5000.0/(float)wData)*BUF2VINIT;
+    }
+  }
+  else
+  {
+    Serial.println("> Input cal. value not found, using default.");
   }
 
   Serial.println("> Initializing reference...");
@@ -759,17 +887,17 @@ void updateADCRef(){
     adciref += analogRead(AIREF); //Iref voltage
   }
   corr_factor = (REFAVAL/((float)adciref));
-  ADC2I1 = ADC2I1INIT/corr_factor;
-  ADC2I2 = ADC2I2INIT/corr_factor;
-  ADC2V1 = ADC2V1INIT/corr_factor;
-  ADC2V2 = ADC2V2INIT/corr_factor;
+  ADC2I1 = ADC2I1/corr_factor;
+  ADC2I2 = ADC2I2/corr_factor;
+  ADC2V1 = ADC2V1/corr_factor;
+  ADC2V2 = ADC2V2/corr_factor;
   adciref = (uint32)((float)adciref/1000.0); //Iref voltage
 }
 
 void recvWithStartEndMarkers() {
   static boolean recvInProgress = false;
   static byte ndx = 0;
-  char startMarkers[] = {'c', 'd', 'y', 'p', 't', 'n', '?', 'v', 's', 'l', 'r'};
+  char startMarkers[] = {'c', 'd', 'y', 'p', 't', 'n', '?', 'v', 's', 'l', 'r', 'z', 'q'};
   char endMarkers[] = {'\n', '\r'};
   char rc;
 
@@ -822,8 +950,8 @@ void recvWithStartEndMarkers() {
       }
     }
 
-    else if (rc == startMarkers[0] || rc == startMarkers[1] || rc == startMarkers[2] || rc == startMarkers[3] || rc == startMarkers[9]
-             || rc == startMarkers[4] || rc == startMarkers[5] || rc == startMarkers[6] || rc == startMarkers[7] || rc == startMarkers[8] || rc == startMarkers[10]) {
+    else if (rc == startMarkers[0] || rc == startMarkers[1] || rc == startMarkers[2] || rc == startMarkers[3] || rc == startMarkers[9] || rc == startMarkers[11]
+             || rc == startMarkers[4] || rc == startMarkers[5] || rc == startMarkers[6] || rc == startMarkers[7] || rc == startMarkers[8] || rc == startMarkers[10] || rc == startMarkers[12]) {
       /*Serial.println("Received startMarker");
         Serial.print("ndx=");
         Serial.println(ndx);
@@ -938,9 +1066,8 @@ void printMenu(uint8 menu2)
       Serial.println(">            def.1                             0-9500, def.4200       50-1500, def.1500");
       Serial.println(">          o[cutoff current, mA]");
       Serial.println(">           50-250, def.50");
-      Serial.println(">  Test Mode");
-      Serial.println(">   t[1-2] r[direction: 0 = boost, 1 = buck] l[duty cycle (0-199)]");
-      Serial.println(">            def.1                             def.0 (boost)/199 (buck)");
+      Serial.println(">  Calibration R/W Mode");
+      Serial.println(">   t[r/w] a[address: 0-999] d[data, unsigned int (0-65535)]");
       Serial.println(">  IR Test Mode");
       Serial.println(">   r[1-2] i[test current, mA]");
       Serial.println(">            100-1500, def.1500");
@@ -948,6 +1075,8 @@ void printMenu(uint8 menu2)
       Serial.println(">   ?");
       Serial.println(">  Version");
       Serial.println(">   v");
+      Serial.println(">  Soft Reset");
+      Serial.println(">   z");
       Serial.println(">  Status");
       Serial.println(">   s");
       Serial.print("\r\n");
@@ -1273,7 +1402,7 @@ void parseTM1(uint8 nArgs, char* args[])
   
   //Set default discharge current/voltage/mode
   psu_dir_1 = DEF_PSU_MODE;
-  tm_duty_1 = 199;
+  tm_duty_1 = 399;
 
   Serial.print("\r\n");
   if(nArgs>1)
@@ -1285,8 +1414,8 @@ void parseTM1(uint8 nArgs, char* args[])
         case 'l':
           Serial.print("> Using duty cycle: ");
           strVal = fast_atoi_leading_pos(args[i]);
-          if(strVal>199)
-            strVal = 199;
+          if(strVal>399)
+            strVal = 399;
           else if(strVal<0)
             strVal = 0;
           tm_duty_1 = strVal;
@@ -1309,13 +1438,6 @@ void parseTM1(uint8 nArgs, char* args[])
           break;
       }
     }
-  }
-  
-  if(discharge_current_1 == DEF_DIS_CUR)
-  {
-    Serial.print("> Using default current: ");
-    Serial.print(discharge_current_1);
-    Serial.println("mA");
   }
   if(psu_dir_1 == DEF_PSU_MODE)
   {
@@ -1816,7 +1938,7 @@ void parseTM2(uint8 nArgs, char* args[])
   
   //Set default discharge current/voltage/mode
   psu_dir_2 = DEF_PSU_MODE;
-  tm_duty_2 = 199;
+  tm_duty_2 = 399;
 
   Serial.print("\r\n");
   if(nArgs>1)
@@ -1828,8 +1950,8 @@ void parseTM2(uint8 nArgs, char* args[])
         case 'l':
           Serial.print("> Using duty cycle: ");
           strVal = fast_atoi_leading_pos(args[i]);
-          if(strVal>199)
-            strVal = 199;
+          if(strVal>399)
+            strVal = 399;
           else if(strVal<0)
             strVal = 0;
           tm_duty_2 = strVal;
@@ -1854,12 +1976,6 @@ void parseTM2(uint8 nArgs, char* args[])
     }
   }
   
-  if(discharge_current_1 == DEF_DIS_CUR)
-  {
-    Serial.print("> Using default current: ");
-    Serial.print(discharge_current_1);
-    Serial.println("mA");
-  }
   if(psu_dir_1 == DEF_PSU_MODE)
   {
     Serial.print("> Using default mode: ");
@@ -2070,22 +2186,22 @@ void runStateMachine(void)
     {
       if (vbat_now1 < charge_voltage_1) //Vbat < 4.2V, Ibat < 1.5A
       {
-        duty1--;
-        if (duty1 < MINBUCKDUTY)
-          duty1 = MINBUCKDUTY;
-      }
-      else //Vbat >= 4.2V, Ibat < 1.5A
-      {
         duty1++;
         if (duty1 > MAXBUCKDUTY)
           duty1 = MAXBUCKDUTY;
       }
+      else //Vbat >= 4.2V, Ibat < 1.5A
+      {
+        duty1--;
+        if (duty1 < MINBUCKDUTY)
+          duty1 = MINBUCKDUTY;
+      }
     }
     else //Ibat >= 1.5A
     {
-      duty1++;
-      if (duty1 > MAXBUCKDUTY)
-        duty1 = MAXBUCKDUTY;
+      duty1--;
+      if (duty1 < MINBUCKDUTY)
+        duty1 = MINBUCKDUTY;
     }
     pwmWrite(OC1PF, duty1);
   }
@@ -2096,8 +2212,8 @@ void runStateMachine(void)
       if (vbat_now1 > discharge_voltage_1) //Vbat > 2.7V, Ibat < 1.5A
       {
         duty1++;
-        if (duty1 > MAXBUCKDUTY)
-          duty1 = MAXBUCKDUTY;
+        if (duty1 > 399)
+          duty1 = 399;
       }
       else //Vbat <= 2.7V, Ibat < 1.5A
       {
@@ -2134,22 +2250,22 @@ void runStateMachine(void)
     {
       if (vbat_now2 < charge_voltage_2) //Vbat < 4.2V, Ibat < 1.5A
       {
-        duty2--;
-        if (duty2 < 0)
-          duty2 = 0;
-      }
-      else //Vbat >= 4.2V, Ibat < 1.5A
-      {
         duty2++;
         if (duty2 > MAXBUCKDUTY)
           duty2 = MAXBUCKDUTY;
       }
+      else //Vbat >= 4.2V, Ibat < 1.5A
+      {
+        duty2--;
+        if (duty2 < MINBUCKDUTY)
+          duty2 = MINBUCKDUTY;
+      }
     }
     else //Ibat >= 1.5A
     {
-      duty2++;
-      if (duty2 > MAXBUCKDUTY)
-        duty2 = MAXBUCKDUTY;
+      duty2--;
+      if (duty2 < MINBUCKDUTY)
+        duty2 = MINBUCKDUTY;
     }
     pwmWrite(OC2PF, duty2);
   }
@@ -2480,6 +2596,9 @@ void runStateMachine(void)
         case 8: //Parking state
           setChg1(DISCONNECT);
           break;
+        case 9: //Test state
+          //setChg1(DISCONNECT);
+          break;
         default:
           setChg1(DISCONNECT);
           state1 = 8;
@@ -2790,6 +2909,9 @@ void runStateMachine(void)
           break;
         case 8: //Parking state
           setChg2(DISCONNECT);
+          break;
+        case 9: //Test state
+          //setChg2(DISCONNECT);
           break;
         default:
           setChg2(DISCONNECT);
@@ -3174,6 +3296,7 @@ void loop() {
         }
         break;
       case 'l': //Calibration mode/update
+      //Currently broken
         updateADCRef();
         ADC2V1 = ADC2V1INIT;
         ADC2V2 = ADC2V2INIT;
@@ -3181,7 +3304,7 @@ void loop() {
         ADC2I2 = ADC2I2INIT;
         mode1 = 3;
         charge_voltage_1 = DEF_CHG_VOL;
-        charge_current_1 = 1000;
+        charge_current_1 = -1000;
         psu_dir_1 = DEF_PSU_MODE;
         state1 = 3;
         settle1 = 0;
@@ -3192,7 +3315,7 @@ void loop() {
         setLED1(CYAN);
         mode2 = 3;
         charge_voltage_2 = DEF_CHG_VOL;
-        charge_current_2 = 1000;
+        charge_current_2 = -1000;
         psu_dir_2 = DEF_PSU_MODE;
         state2 = 3;
         settle2 = 0;
@@ -3237,6 +3360,28 @@ void loop() {
         Serial.print("\r\n> Software version: ");
         Serial.println(vers);
         Serial.println("\r\n>");
+        break;
+      case 'q':
+        if(args[0][1] == '1')
+        {
+          mode1 = 3;
+          state1 = 9;
+          settle1 = 0;
+          parseTM1(i, args);
+          setChg1(CHARGE);
+          pwmWrite(OC1PF, tm_duty_1);
+          //printMenu(mode1);
+        }
+        else if(args[0][1] == '2')
+        {
+          mode2 = 3;
+          state2 = 9;
+          settle2 = 0;
+          parseTM2(i, args);
+          setChg2(CHARGE);
+          pwmWrite(OC2PF, tm_duty_2);
+          //printMenu(mode2);
+        }
         break;
       case 's':
         Serial.println("\r\n");
@@ -3324,6 +3469,10 @@ void loop() {
         printMenu(mode1);
         //Timer2.pause(); //Start the timer counting
         break;
+      case 'z':
+        //Soft reset
+        nvic_sys_reset();
+        break;
       default:
         mode1 = 6;
         printMenu(mode1);
@@ -3402,6 +3551,18 @@ void loop() {
   else if (interruptCounter > 0) {
     interruptCounter--;
     runStateMachine();
+  }
+  if (slot1_startup > 0)
+  {
+    slot1_startup--;
+    if(slot1_startup == 0)
+      digitalWrite(C1ON, LOW); //synchronous buck started, reconnect cell 
+  }
+  if (slot2_startup > 0)
+  {
+    slot2_startup--;
+    if(slot2_startup == 0)
+      digitalWrite(C2ON, LOW); //synchronous buck started, reconnect cell 
   }
 }
 
