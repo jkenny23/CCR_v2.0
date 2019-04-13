@@ -83,8 +83,10 @@ volatile uint8 psu_dir_2 = 0;
 volatile uint16 tm_duty_2 = 0;
 volatile uint8 slot1_startup = 0;
 volatile uint8 slot2_startup = 0;
+volatile uint8 regen_1 = 0;
+volatile uint8 regen_2 = 0;
 
-#define STARTUP_CYCLES 2 //number of cycles-1 (0.25ms each) to delay before turning on cell
+#define STARTUP_CYCLES 5 //number of cycles-1 (0.25ms each) to delay before turning on cell
 
 //Initialize reference voltage with default until read out of EEPROM
 #define REFAVALINIT 2048000.0f
@@ -1331,15 +1333,17 @@ void parsePSU1(uint8 nArgs, char* args[])
         case 'r':
           Serial.print("> Using direction: ");
           strVal = fast_atoi_leading_pos(args[i]);
-          if(strVal>1)
-            strVal = 1;
+          if(strVal>2)
+            strVal = 2;
           else if(strVal<0)
             strVal = 0;
           psu_dir_1 = strVal;
           if(psu_dir_1 == 0)
-            Serial.println("Boost");
-          else
+            Serial.println("Discharge");
+          else if(psu_dir_1 == 1)
             Serial.println("Buck");
+          else if(psu_dir_1 == 2)
+            Serial.println("Boost");
           break;
         case 'o':
           Serial.print("> Using cutoff: ");
@@ -2207,28 +2211,56 @@ void runStateMachine(void)
   }
   if ((state1 == 1) || (state1 == 6) || (state1 == 7)) //Discharging states
   {
-    if (ibat_now1 < discharge_current_1) //Ibat < 1.5A
+    if(psu_dir_1 < 2)
     {
-      if (vbat_now1 > discharge_voltage_1) //Vbat > 2.7V, Ibat < 1.5A
+      if (ibat_now1 < discharge_current_1) //Ibat < 1.5A
       {
-        duty1++;
-        if (duty1 > 399)
-          duty1 = 399;
+        if (vbat_now1 > discharge_voltage_1) //Vbat > 2.7V, Ibat < 1.5A
+        {
+          duty1++;
+          if (duty1 > MAXBUCKDUTY)
+            duty1 = MAXBUCKDUTY;
+        }
+        else //Vbat <= 2.7V, Ibat < 1.5A
+        {
+          duty1--;
+          if (duty1 < MINBUCKDUTY)
+            duty1 = MINBUCKDUTY;
+        }
       }
-      else //Vbat <= 2.7V, Ibat < 1.5A
+      else //Ibat >= 1.5A
       {
         duty1--;
-        if (duty1 < 0)
-          duty1 = 0;
+        if (duty1 < MINBUCKDUTY)
+          duty1 = MINBUCKDUTY;
       }
+      pwmWrite(OC1NF2, duty1); //CC Load
     }
-    else //Ibat >= 1.5A
+    else
     {
-      duty1--;
-      if (duty1 < 0)
-        duty1 = 0;
+      if (ibat_now1 < discharge_current_1) //Ibat < 1.5A
+      {
+        if (vbat_now1 > discharge_voltage_1) //Vbat > 2.7V, Ibat < 1.5A
+        {
+          duty1--;
+          if (duty1 < MINBUCKDUTY)
+            duty1 = MINBUCKDUTY;
+        }
+        else //Vbat <= 2.7V, Ibat < 1.5A
+        {
+          duty1++;
+          if (duty1 > MAXBUCKDUTY)
+            duty1 = MAXBUCKDUTY;
+        }
+      }
+      else //Ibat >= 1.5A
+      {
+        duty1++;
+        if (duty1 > MAXBUCKDUTY)
+          duty1 = MAXBUCKDUTY;
+      }
+      pwmWrite(OC1PF, duty1);
     }
-    pwmWrite(OC1NF2, duty1); //CC Load
   }
   //Cell 2 - Ibat, Vbat, CC/CV control loops
   adcval4 = analogRead(AC2A); //Ibat raw
@@ -2282,17 +2314,20 @@ void runStateMachine(void)
       else //Vbat <= 2.7V, Ibat < 1.5A
       {
         duty2--;
-        if (duty2 < 0)
-          duty2 = 0;
+        if (duty2 < MINBUCKDUTY)
+          duty2 = MINBUCKDUTY;
       }
     }
     else //Ibat >= 1.5A
     {
       duty2--;
-      if (duty2 < 0)
-        duty2 = 0;
+      if (duty2 < MINBUCKDUTY)
+        duty2 = MINBUCKDUTY;
     }
-    pwmWrite(OC2NF2, duty2);
+    if(psu_dir_1 < 2)
+      pwmWrite(OC2NF2, duty2); //CC Load
+    else
+      pwmWrite(OC2PF, duty2);
   }
   //digitalWrite(PB12, LOW);
 
@@ -3209,7 +3244,7 @@ void loop() {
             setChg1(CHARGE);
             setLED1(CYAN);
           }
-          else
+          else if(psu_dir_1 == 0)
           {
             state1 = 1;
             settle1 = 0;
@@ -3217,6 +3252,16 @@ void loop() {
             mwh1 = 0;
             //Timer2.resume(); //Start the timer counting
             setChg1(DISCHARGE);
+            setLED1(YELLOW);
+          }
+          else if(psu_dir_1 == 2)
+          {
+            state1 = 1;
+            settle1 = 0;
+            mah1 = 0;
+            mwh1 = 0;
+            //Timer2.resume(); //Start the timer counting
+            setChg1(REGEN);
             setLED1(YELLOW);
           }
           printMenu(mode1);
