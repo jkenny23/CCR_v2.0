@@ -28,7 +28,7 @@
 
 volatile int interruptCounter;
 
-const char vers[] = "2.0-04092019"; 
+const char vers[] = "2.0-06072019"; 
 
 #define AFTERDISWAIT 300//300 //300s after charging wait time
 #define AFTERCHGWAIT 60//60 //60s after charging wait time
@@ -2241,7 +2241,7 @@ void runStateMachine(void)
       if (ibat_now1 < discharge_current_1) //Ibat < 1.5A
       {
         if (vbat_now1 > discharge_voltage_1) //Vbat > 2.7V, Ibat < 1.5A
-        {
+        { 
           duty1--;
           if (duty1 < MINBUCKDUTY)
             duty1 = MINBUCKDUTY;
@@ -2978,7 +2978,7 @@ void runStateMachine(void)
         //Serial.print(",mA,");
         //Serial.print(vbat_now);//2.417);
         //Serial.print(",mV,");
-        //Serial.print(duty1);//2.417);
+        //Serial.println(duty1);//2.417);
         //Serial.print(",");
         //Serial.println(duty2);//2.417);
         //Serial.println(",Duty2");
@@ -3256,12 +3256,13 @@ void loop() {
           }
           else if(psu_dir_1 == 2)
           {
+            mode1 = 1;
             state1 = 1;
             settle1 = 0;
             mah1 = 0;
             mwh1 = 0;
             //Timer2.resume(); //Start the timer counting
-            setChg1(REGEN);
+            setChg1(CHARGE);
             setLED1(YELLOW);
           }
           printMenu(mode1);
@@ -3510,7 +3511,7 @@ void loop() {
         //printMenu(mode1);
         break;
       case '?':
-        mode1 = 6;
+        mode1 = 99;
         printMenu(mode1);
         //Timer2.pause(); //Start the timer counting
         break;
@@ -3519,7 +3520,7 @@ void loop() {
         nvic_sys_reset();
         break;
       default:
-        mode1 = 6;
+        mode1 = 99;
         printMenu(mode1);
         //Timer2.pause(); //Start the timer counting
         break;
