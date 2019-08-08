@@ -28,7 +28,7 @@
 
 volatile int interruptCounter;
 
-const char vers[] = "2.0-06072019"; 
+const char vers[] = "2.0-06262019"; 
 
 #define AFTERDISWAIT 300//300 //300s after charging wait time
 #define AFTERCHGWAIT 60//60 //60s after charging wait time
@@ -45,10 +45,10 @@ const char vers[] = "2.0-06072019";
 #define BLUE 5
 #define PURPLE 6
 #define WHITE 7
-#define MAX_CHG_CUR -10000
+#define MAX_CHG_CUR -6500
 #define MAX_CHG_VOL 4500
 #define MIN_CCC 10
-#define MAX_DIS_CUR 10000
+#define MAX_DIS_CUR 6500
 #define MIN_DIS_VOL 1000
 #define MAX_DIS_VOL 4300
 #define MINBUCKDUTY 1
@@ -59,7 +59,7 @@ const char vers[] = "2.0-06072019";
 #define DEF_DIS_CUR 1500
 #define DEF_DIS_VOL 2700
 #define DEF_DIS_MODE 0
-#define DEF_PSU_MODE 1
+#define DEF_PSU_MODE 0
 #define DEF_CYCLES 1
 #define OVT_THRESH 45
 #define LED_BRIGHTNESS 80 //1-255 for LED brightness
@@ -86,7 +86,7 @@ volatile uint8 slot2_startup = 0;
 volatile uint8 regen_1 = 0;
 volatile uint8 regen_2 = 0;
 
-#define STARTUP_CYCLES 10 //number of cycles-1 (0.25ms each) to delay before turning on cell
+#define STARTUP_CYCLES 5 //number of cycles-1 (0.25ms each) to delay before turning on cell
 
 //Initialize reference voltage with default until read out of EEPROM
 #define REFAVALINIT 2048000.0f
@@ -102,10 +102,10 @@ volatile float REFAVAL = REFAVALINIT;
 //Current reads high => increase ADC2I value
 //EEPROM address for slot 1 voltage value: 1
 #define ADC2V1ADDR 1
-#define ADC2V1INIT 842.452f
+#define ADC2V1INIT 432.981f
 //EEPROM address for slot 2 voltage value: 2
 #define ADC2V2ADDR 2
-#define ADC2V2INIT 842.452f
+#define ADC2V2INIT 432.981f
 //todo: reset adc2v2init during "l" calibration for storing correction factors
 //EEPROM address for slot 1 current value: 3
 #define ADC2I1ADDR 3
@@ -127,8 +127,8 @@ volatile float REFAVAL = REFAVALINIT;
 #define BUF2VADDR 5
 #define BUF2VINIT 3.22266f //x/4096*3.3*1000*4
 volatile float BUF2V = BUF2VINIT;
-#define VR12V 1.61790f
-#define VR22V 1.61694f
+#define VR12V 2.41699f
+#define VR22V 2.41699f
 volatile float ADC2I1 = ADC2I1INIT;
 volatile float ADC2V1 = ADC2V1INIT;
 volatile float ADC2I2 = ADC2I2INIT;
@@ -161,7 +161,7 @@ volatile float corr_factor = 1.0f;
 #define AUXSEL1 PB12 //Lo = ABUFV, Hi = HS thermistor #1
 #define OC1PF PA8 //Buck FET control output, positive logic; higher PWM duty = higher output voltage
 #define OC1ON PA9 //Buck disable, active low (0 = buck disabled)
-#define OC2PF PB10 //Buck FET control output, positive logic; higher PWM duty = higher output voltage
+#define OC2PF PA10 //Buck FET control output, positive logic; higher PWM duty = higher output voltage
 #define OC2ON PB8 //Buck disable, active low (0 = buck disabled)
 #define OC1NF2 PB6 //CC 1 setting output
 #define OC2NF2 PB7 //CC 2 setting output
@@ -341,8 +341,6 @@ void setChg1(unsigned char state) {
       digitalWrite(OC1NF2, LOW);
       pinMode(C1DOFF, OUTPUT);
       digitalWrite(C1DOFF, HIGH);
-      //pinMode(FANON, OUTPUT);
-      //digitalWrite(FANON, LOW); //Non-inverting mode
       break;
     case CHARGE:
       pinMode(OC1NF2, OUTPUT);
@@ -357,8 +355,6 @@ void setChg1(unsigned char state) {
       digitalWrite(OC1ON, HIGH);
       slot1_startup = STARTUP_CYCLES;
       digitalWrite(C1ON, LOW); //override cell protection FET off until synchronous buck is started
-      //pinMode(FANON, OUTPUT);
-      //digitalWrite(FANON, LOW); //Non-inverting mode
       break;
     case DISCHARGE:
       pinMode(OC1ON, OUTPUT);
@@ -371,24 +367,7 @@ void setChg1(unsigned char state) {
       pinMode(C1DOFF, OUTPUT);
       digitalWrite(C1DOFF, LOW); //Non-inverting mode
       digitalWrite(C1ON, HIGH); //enable slot cell protection FET
-      //pinMode(FANON, OUTPUT);
-      //digitalWrite(FANON, HIGH); //Non-inverting mode
       break;
-    case REGEN:
-      pinMode(OC1NF2, OUTPUT);
-      digitalWrite(OC1NF2, LOW);
-      pinMode(C1DOFF, OUTPUT);
-      digitalWrite(C1DOFF, HIGH); //Inverting
-      presetDuty1();
-      duty1 = initbuckduty1; //Assume 3.7V initial cell voltage - optimise later
-      pinMode(OC1PF, PWM);
-      pwmWrite(OC1PF, duty1);
-      pinMode(OC1ON, OUTPUT);
-      digitalWrite(OC1ON, HIGH);
-      slot1_startup = STARTUP_CYCLES;
-      digitalWrite(C1ON, LOW); //override cell protection FET off until synchronous buck is started
-      //pinMode(FANON, OUTPUT);
-      //digitalWrite(FANON, LOW); //Non-inverting mode
     default:
       digitalWrite(C1ON, LOW); //disable slot cell protection FET
       pinMode(OC1ON, OUTPUT);
@@ -399,8 +378,6 @@ void setChg1(unsigned char state) {
       digitalWrite(OC1NF2, LOW);
       pinMode(C1DOFF, OUTPUT);
       digitalWrite(C1DOFF, HIGH);
-      //pinMode(FANON, OUTPUT);
-      //digitalWrite(FANON, LOW); //Non-inverting mode
       break;
   }
 }
@@ -413,6 +390,7 @@ void setChg2(unsigned char state) {
       #define OC2NF2 PB7 //CC setting
       #define C2DOFF PA15*/
     case DISCONNECT:
+      digitalWrite(C2ON, LOW); //disable slot cell protection FET
       pinMode(OC2ON, OUTPUT);
       digitalWrite(OC2ON, LOW);
       pinMode(OC2PF, OUTPUT);
@@ -421,8 +399,6 @@ void setChg2(unsigned char state) {
       digitalWrite(OC2NF2, LOW);
       pinMode(C2DOFF, OUTPUT);
       digitalWrite(C2DOFF, HIGH);
-      //pinMode(FANON, OUTPUT);
-      //digitalWrite(FANON, LOW); //Non-inverting mode
       break;
     case CHARGE:
       pinMode(OC2NF2, OUTPUT);
@@ -432,13 +408,11 @@ void setChg2(unsigned char state) {
       presetDuty2();
       duty2 = initbuckduty2; //Assume 3.7V initial cell voltage - optimise later
       pinMode(OC2PF, PWM);
-      pwmWrite(OC2PF, duty1);
+      pwmWrite(OC2PF, duty2);
       pinMode(OC2ON, OUTPUT);
       digitalWrite(OC2ON, HIGH);
       slot2_startup = STARTUP_CYCLES;
       digitalWrite(C2ON, LOW); //override cell protection FET off until synchronous buck is started
-      //pinMode(FANON, OUTPUT);
-      //digitalWrite(FANON, LOW); //Non-inverting mode
       break;
     case DISCHARGE:
       pinMode(OC2ON, OUTPUT);
@@ -447,28 +421,13 @@ void setChg2(unsigned char state) {
       digitalWrite(OC2PF, LOW); //Non-inverting mode
       duty2 = 0;
       pinMode(OC2NF2, PWM);
-      pwmWrite(OC2NF2, duty1);
+      pwmWrite(OC2NF2, duty2);
       pinMode(C2DOFF, OUTPUT);
       digitalWrite(C2DOFF, LOW); //Non-inverting mode
-      //pinMode(FANON, OUTPUT);
-      //digitalWrite(FANON, HIGH); //Non-inverting mode
+      digitalWrite(C2ON, HIGH); //enable slot cell protection FET
       break;
-    case REGEN:
-      pinMode(OC2NF2, OUTPUT);
-      digitalWrite(OC2NF2, LOW);
-      pinMode(C2DOFF, OUTPUT);
-      digitalWrite(C2DOFF, HIGH); //Inverting
-      presetDuty2();
-      duty2 = initbuckduty2; //Assume 3.7V initial cell voltage - optimise later
-      pinMode(OC2PF, PWM);
-      pwmWrite(OC2PF, duty1);
-      pinMode(OC2ON, OUTPUT);
-      digitalWrite(OC2ON, HIGH);
-      slot2_startup = STARTUP_CYCLES;
-      digitalWrite(C2ON, LOW); //override cell protection FET off until synchronous buck is started
-      //pinMode(FANON, OUTPUT);
-      //digitalWrite(FANON, LOW); //Non-inverting mode
     default:
+      digitalWrite(C2ON, LOW); //disable slot cell protection FET
       pinMode(OC2ON, OUTPUT);
       digitalWrite(OC2ON, LOW);
       pinMode(OC2PF, OUTPUT);
@@ -477,8 +436,6 @@ void setChg2(unsigned char state) {
       digitalWrite(OC2NF2, LOW);
       pinMode(C2DOFF, OUTPUT);
       digitalWrite(C2DOFF, HIGH);
-      //pinMode(FANON, OUTPUT);
-      //digitalWrite(FANON, LOW); //Non-inverting mode
       break;
   }
 }
@@ -827,7 +784,7 @@ void setup() {
     {
       Serial.print("> Slot 2 current cal. value found: ");
       Serial.print(wData);
-      Serial.println("mV");
+      Serial.println("mA");
       //Current reported / Current real * ADC2IxINIT orig = ADC2IxINIT new
       ADC2I2 = ADC2I2 * 1000.0/((float)wData);
     }
@@ -1061,6 +1018,8 @@ void printMenu(uint8 menu2)
       Serial.println(">  Discharge");
       Serial.println(">   d[1-2] i[discharge current, mA] v[cutoff voltage, mV] m[mode: 0 = constant current, 1 = stepped]");
       Serial.println(">            100-1500, def.1500       1000-3900, def.2700   def.0");
+      Serial.println(">          r[direction: 0 = resistive, 2 = regen]");
+      Serial.println(">            def.0");
       Serial.println(">  Cycle");
       Serial.println(">   y[1-2] i[discharge current, mA] v[cutoff voltage, mV] m[mode: 0 = constant current, 1 = stepped]");
       Serial.println(">            100-1500, def.1500       1000-3900, def.2700   def.0");
@@ -1076,8 +1035,8 @@ void printMenu(uint8 menu2)
       Serial.println(">  Calibration R/W Mode");
       Serial.println(">   t[r/w] a[address: 0-999] d[data, unsigned int (0-65535)]");
       Serial.println(">  IR Test Mode");
-      Serial.println(">   r[1-2] i[test current, mA]");
-      Serial.println(">            100-1500, def.1500");
+      Serial.println(">   r[1-2] i[test current, mA] r[direction: 0 = resistive, 2 = regen]");
+      Serial.println(">            100-1500, def.1500  def.0");
       Serial.println(">  Help (Prints this menu)");
       Serial.println(">   ?");
       Serial.println(">  Version");
@@ -1177,6 +1136,7 @@ void parseDischarge1(uint8 nArgs, char* args[])
   discharge_voltage_1 = DEF_DIS_VOL;
   discharge_current_1 = DEF_DIS_CUR;
   discharge_mode_1 = DEF_DIS_MODE;
+  psu_dir_1 = DEF_PSU_MODE;
 
   Serial.print("\r\n");
   if(nArgs>1)
@@ -1220,6 +1180,19 @@ void parseDischarge1(uint8 nArgs, char* args[])
           else
             Serial.println("Stepped");
           break;
+        case 'r':
+          Serial.print("> Using mode: ");
+          strVal = fast_atoi_leading_pos(args[i]);
+          if(strVal>1)
+            strVal = 2;
+          else if(strVal<0)
+            strVal = 0;
+          psu_dir_1 = strVal;
+          if(psu_dir_1 == 0)
+            Serial.println("Resistive");
+          else
+            Serial.println("Regenerative");
+          break;
         default:
           break;
       }
@@ -1245,6 +1218,18 @@ void parseDischarge1(uint8 nArgs, char* args[])
       Serial.println("Constant current");
     else
       Serial.println("Stepped");
+  }
+  if(psu_dir_1 == DEF_PSU_MODE)
+  {
+    Serial.print("> Using default mode: ");
+    if(psu_dir_1 == 0)
+    {
+      Serial.println("Resistive");
+    }
+    else
+    {
+      Serial.println("Regenerative");
+    }
   }
 }
 
@@ -1742,6 +1727,7 @@ void parseDischarge2(uint8 nArgs, char* args[])
   discharge_voltage_2 = DEF_DIS_VOL;
   discharge_current_2 = DEF_DIS_CUR;
   discharge_mode_2 = DEF_DIS_MODE;
+  psu_dir_1 = DEF_PSU_MODE;
 
   Serial.print("\r\n");
   if(nArgs>1)
@@ -1785,6 +1771,19 @@ void parseDischarge2(uint8 nArgs, char* args[])
           else
             Serial.println("Stepped");
           break;
+        case 'r':
+          Serial.print("> Using mode: ");
+          strVal = fast_atoi_leading_pos(args[i]);
+          if(strVal>1)
+            strVal = 2;
+          else if(strVal<0)
+            strVal = 0;
+          psu_dir_1 = strVal;
+          if(psu_dir_1 == 0)
+            Serial.println("Resistive");
+          else
+            Serial.println("Regenerative");
+          break;
         default:
           break;
       }
@@ -1811,6 +1810,18 @@ void parseDischarge2(uint8 nArgs, char* args[])
     else
       Serial.println("Stepped");
   }
+  if(psu_dir_1 == DEF_PSU_MODE)
+  {
+    Serial.print("> Using default mode: ");
+    if(psu_dir_1 == 0)
+    {
+      Serial.println("Resistive");
+    }
+    else
+    {
+      Serial.println("Regenerative");
+    }
+  }
 }
 
 void parseIR2(uint8 nArgs, char* args[])
@@ -1820,6 +1831,7 @@ void parseIR2(uint8 nArgs, char* args[])
   
   //Set default discharge current
   discharge_current_2 = DEF_DIS_CUR;
+  psu_dir_1 = DEF_PSU_MODE;
 
   Serial.print("\r\n");
   if(nArgs>1)
@@ -1839,6 +1851,19 @@ void parseIR2(uint8 nArgs, char* args[])
           Serial.print(discharge_current_2);
           Serial.println("mA");
           break;
+        case 'r':
+          Serial.print("> Using mode: ");
+          strVal = fast_atoi_leading_pos(args[i]);
+          if(strVal>1)
+            strVal = 2;
+          else if(strVal<0)
+            strVal = 0;
+          psu_dir_1 = strVal;
+          if(psu_dir_1 == 0)
+            Serial.println("Resistive");
+          else
+            Serial.println("Regenerative");
+          break;
         default:
           break;
       }
@@ -1850,6 +1875,18 @@ void parseIR2(uint8 nArgs, char* args[])
     Serial.print("> Using default current: ");
     Serial.print(discharge_current_2);
     Serial.println("mA");
+  }
+  if(psu_dir_1 == DEF_PSU_MODE)
+  {
+    Serial.print("> Using default mode: ");
+    if(psu_dir_1 == 0)
+    {
+      Serial.println("Resistive");
+    }
+    else
+    {
+      Serial.println("Regenerative");
+    }
   }
 }
 
@@ -2046,6 +2083,7 @@ void parseCycle2(uint8 nArgs, char* args[])
   discharge_voltage_2 = DEF_DIS_VOL;
   discharge_current_2 = DEF_DIS_CUR;
   discharge_mode_2 = DEF_DIS_MODE;
+  psu_dir_1 = DEF_PSU_MODE;
   //Set default charge current/voltage/cutoff
   charge_voltage_2 = DEF_CHG_VOL;
   charge_current_2 = DEF_CHG_CUR;
@@ -2143,6 +2181,19 @@ void parseCycle2(uint8 nArgs, char* args[])
           num_cycles_2 = strVal;
           Serial.println(num_cycles_2);
           break;
+        case 'r':
+          Serial.print("> Using mode: ");
+          strVal = fast_atoi_leading_pos(args[i]);
+          if(strVal>1)
+            strVal = 2;
+          else if(strVal<0)
+            strVal = 0;
+          psu_dir_1 = strVal;
+          if(psu_dir_1 == 0)
+            Serial.println("Resistive");
+          else
+            Serial.println("Regenerative");
+          break;
         default:
           break;
       }
@@ -2168,6 +2219,18 @@ void parseCycle2(uint8 nArgs, char* args[])
       Serial.println("Constant current");
     else
       Serial.println("Stepped");
+  }
+  if(psu_dir_1 == DEF_PSU_MODE)
+  {
+    Serial.print("> Using default mode: ");
+    if(psu_dir_1 == 0)
+    {
+      Serial.println("Resistive");
+    }
+    else
+    {
+      Serial.println("Regenerative");
+    }
   }
   if(charge_voltage_2 == DEF_CHG_VOL)
   {
@@ -2239,6 +2302,7 @@ void runStateMachine(void)
         duty1 = MINBUCKDUTY;
     }
     pwmWrite(OC1PF, duty1);
+    //pwmWrite(OC2PF, duty1);
   }
   if ((state1 == 1) || (state1 == 6) || (state1 == 7)) //Discharging states
   {
@@ -2291,6 +2355,7 @@ void runStateMachine(void)
           duty1 = MAXBUCKDUTY;
       }
       pwmWrite(OC1PF, duty1);
+      //pwmWrite(OC2PF, duty1);
     }
   }
   //Cell 2 - Ibat, Vbat, CC/CV control loops
@@ -2334,31 +2399,57 @@ void runStateMachine(void)
   }
   if ((state2 == 1) || (state2 == 6) || (state2 == 7)) //Discharging states
   {
-    if (ibat_now2 < discharge_current_2) //Ibat < 1.5A
+    if(psu_dir_2 < 2)
     {
-      if (vbat_now2 > discharge_voltage_2) //Vbat > 2.7V, Ibat < 1.5A
+      if (ibat_now2 < discharge_current_2) //Ibat < 1.5A
       {
-        duty2++;
-        if (duty2 > MAXBUCKDUTY)
-          duty2 = MAXBUCKDUTY;
+        if (vbat_now2 > discharge_voltage_2) //Vbat > 2.7V, Ibat < 1.5A
+        {
+          duty2++;
+          if (duty2 > MAXBUCKDUTY)
+            duty2 = MAXBUCKDUTY;
+        }
+        else //Vbat <= 2.7V, Ibat < 1.5A
+        {
+          duty2--;
+          if (duty2 < MINBUCKDUTY)
+            duty2 = MINBUCKDUTY;
+        }
       }
-      else //Vbat <= 2.7V, Ibat < 1.5A
+      else //Ibat >= 1.5A
       {
         duty2--;
         if (duty2 < MINBUCKDUTY)
           duty2 = MINBUCKDUTY;
       }
-    }
-    else //Ibat >= 1.5A
-    {
-      duty2--;
-      if (duty2 < MINBUCKDUTY)
-        duty2 = MINBUCKDUTY;
-    }
-    if(psu_dir_1 < 2)
       pwmWrite(OC2NF2, duty2); //CC Load
+    }
     else
+    {
+      if (ibat_now2 < discharge_current_2) //Ibat < 1.5A
+      {
+        if (vbat_now2 > discharge_voltage_2) //Vbat > 2.7V, Ibat < 1.5A
+        { 
+          duty2--;
+          if (duty2 < MINBUCKDUTY)
+            duty2 = MINBUCKDUTY;
+        }
+        else //Vbat <= 2.7V, Ibat < 1.5A
+        {
+          duty2++;
+          if (duty2 > MAXBUCKDUTY)
+            duty2 = MAXBUCKDUTY;
+        }
+      }
+      else //Ibat >= 1.5A
+      {
+        duty2++;
+        if (duty2 > MAXBUCKDUTY)
+          duty2 = MAXBUCKDUTY;
+      }
       pwmWrite(OC2PF, duty2);
+      //pwmWrite(OC2PF, duty1);
+    }
   }
   //digitalWrite(PB12, LOW);
 
@@ -2384,7 +2475,14 @@ void runStateMachine(void)
       voc11 = vbat1; //Vbat in mV/2 (mV*2 * (500/2000))
       iload1 = 0;
       vload1 = 0;
-      setChg1(DISCHARGE);
+      if(psu_dir_1 < 2)
+      {
+        setChg1(DISCHARGE);
+      }
+      else
+      {
+        setChg1(CHARGE);
+      }
       irstate1 = 2;
     }
     if ((irstate1 == 2) && (loop1 == 1000)) //Get Vload, Iload from 250-500ms of sampling, then turn off load at 500ms
@@ -2719,7 +2817,14 @@ void runStateMachine(void)
       voc12 = vbat2; //Vbat in mV/2 (mV*2 * (500/2000))
       iload2 = 0;
       vload2 = 0;
-      setChg2(DISCHARGE);
+      if(psu_dir_2 < 2)
+      {
+        setChg2(DISCHARGE);
+      }
+      else
+      {
+        setChg2(CHARGE);
+      }
       irstate2 = 2;
     }
     if ((irstate2 == 2) && (loop2 == 1003)) //Get Vload, Iload from 250-500ms of sampling, then turn off load at 500ms
@@ -2959,10 +3064,20 @@ void runStateMachine(void)
               }
               else
               {
-                state2 = 1;
-                settle2 = 0;
-                setLED2(YELLOW);
-                setChg2(DISCHARGE);
+                if(psu_dir_2 == 2)
+                {
+                  state2 = 1;
+                  settle2 = 0;
+                  setChg2(CHARGE);
+                  setLED2(YELLOW);
+                }
+                else
+                {
+                  state2 = 1;
+                  settle2 = 0;
+                  setLED2(YELLOW);
+                  setChg2(DISCHARGE);
+                }
               }
             }
             //Msg type 2 (Charged): 0,4126.45,mV,32.57,mOhms,-750.19,mAH,-2810.34,mWH,23.5,C,6,1
@@ -3169,7 +3284,14 @@ void loop() {
             mah1 = 0;
             mwh1 = 0;
             //Timer2.resume(); //Start the timer counting
-            setChg1(DISCHARGE);
+            if(psu_dir_1 == 0) //Resistive Mode
+            {
+              setChg1(DISCHARGE);
+            }
+            else if(psu_dir_1 == 2) //Regenerative Mode
+            {
+              setChg1(CHARGE);
+            }
             setLED1(YELLOW);
             printMenu(mode1);
           }
@@ -3192,7 +3314,14 @@ void loop() {
             mah2 = 0;
             mwh2 = 0;
             //Timer2.resume(); //Start the timer counting
-            setChg2(DISCHARGE);
+            if(psu_dir_2 == 0) //Resistive Mode
+            {
+              setChg2(DISCHARGE);
+            }
+            else if(psu_dir_2 == 2) //Regenerative Mode
+            {
+              setChg2(CHARGE);
+            }
             setLED2(YELLOW);
             printMenu(mode2);
           }
@@ -3201,25 +3330,45 @@ void loop() {
       case 'r':
         if(args[0][1] == '1')
         {
-          mode1 = 6;
-          parseIR1(i, args);
-          state1 = 6;
-          settle1 = 0;
-          ir1 = 0;
-          //Timer2.resume(); //Start the timer counting
-          setLED1(PURPLE);
-          printMenu(mode1);
+          if(getCell1RV() > 100)
+          {
+            setLED1(RED);
+            Serial.println("> Detected reverse polarity cell, cancelling IR test");
+            Serial.print("> Cell 1 voltage: ");
+            Serial.println(getCell1RV());
+          }
+          else
+          {
+            mode1 = 6;
+            parseIR1(i, args);
+            state1 = 6;
+            settle1 = 0;
+            ir1 = 0;
+            //Timer2.resume(); //Start the timer counting
+            setLED1(PURPLE);
+            printMenu(mode1);
+          }
         }
         else if(args[0][1] == '2')
         {
-          mode2 = 6;
-          parseIR2(i, args);
-          state2 = 6;
-          settle2 = 0;
-          ir2 = 0;
-          //Timer2.resume(); //Start the timer counting
-          setLED2(PURPLE);
-          printMenu(mode2);
+          if(getCell2RV() > 100)
+          {
+            setLED2(RED);
+            Serial.println("> Detected reverse polarity cell, cancelling IR test");
+            Serial.print("> Cell 2 voltage: ");
+            Serial.println(getCell2RV());
+          }
+          else
+          {
+            mode2 = 6;
+            parseIR2(i, args);
+            state2 = 6;
+            settle2 = 0;
+            ir2 = 0;
+            //Timer2.resume(); //Start the timer counting
+            setLED2(PURPLE);
+            printMenu(mode2);
+          }
         }
         break;
       case 'y':
@@ -3448,7 +3597,7 @@ void loop() {
       case 'v':        
         Serial.print("\r\n> Software version: ");
         Serial.println(vers);
-        Serial.println("\r\n>");
+        Serial.print("\r\n> ");
         break;
       case 'q':
         if(args[0][1] == '1')
