@@ -1,3 +1,5 @@
+## Library Modified for inverted logic to support CCR_v2.x Project
+
 This is an adaptation of lavallc's Maple port of the NeoPixel library for STM32Duino. It is not compatible with other boards at this time. We added "-ANDnXOR" to the file names so there won't be a conflict in your build environment. Hopefully we'll find time to pull in the latest Adafruit changes.
 
 
