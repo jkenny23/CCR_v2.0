@@ -24,7 +24,8 @@
 //#define REGEN_ENABLED
 //#define MON_SHUNT
 //#define V_1S //220k/150k 0-4.84V
-#define V_2S //430k/150k 0-9.46V
+//#define V_2S //430k/150k 0-9.46V, 2s charging allowed
+#define V_2S1 //430k/150k 0-9.46V, only 1s charging allowed
 
 #ifdef OLED_ENABLED
   #include <Adafruit_GFX_AS.h>
@@ -47,7 +48,7 @@
 
 volatile int interruptCounter;
 
-const char vers[] = "2.0-12202019"; 
+const char vers[] = "2.0-02252020"; 
 
 #define AFTERDISWAIT 300//300 //300s after charging wait time
 #define AFTERCHGWAIT 60//60 //60s after charging wait time
@@ -122,15 +123,22 @@ const char vers[] = "2.0-12202019";
   #define ABUFV PA0
   #define AC1T PA4
   #define AC2T PA3
+  #ifdef V_1S
+    #define OVV_THRESH 4370
+  #endif
+  #ifdef V_2S1
+    #define OVV_THRESH 4370
+  #endif
+  #ifdef V_2S
+    #define OVV_THRESH 8770
+  #endif
 #endif
 #ifdef HW_2_0
   #define MAX_CHG_CUR -3500
-  #define MAX_CHG_VOL 4500
   #define MIN_CHG_VOL 1000
   #define MIN_CCC 10
   #define MAX_DIS_CUR 5000
   #define MIN_DIS_VOL 700
-  #define MAX_DIS_VOL 4300
   #define MINBUCKDUTY 0
   #define MAXBUCKDUTY 400
   #define MAX_VBUF 12600
@@ -146,10 +154,24 @@ const char vers[] = "2.0-12202019";
   #define OC1PF PA9 //Buck PFET output, negative logic; lower PWM duty = higher output voltage
   #define OC2NF1 PA10 //Boost NFET output
   #define OC2PF PB8 //Buck PFET output, negative logic; lower PWM duty = higher output voltage
+  #ifdef V_1S
+    #define OVV_THRESH 4370
+    #define MAX_CHG_VOL 4500
+    #define MAX_DIS_VOL 4300
+  #endif
+  #ifdef V_2S1
+    #define OVV_THRESH 4370
+    #define MAX_CHG_VOL 4500
+    #define MAX_DIS_VOL 4300
+  #endif
+  #ifdef V_2S
+    #define OVV_THRESH 8770
+    #define MAX_CHG_VOL 8700
+    #define MAX_DIS_VOL 8400
+  #endif
 #endif
 #ifdef HW_2_4
   #define MAX_CHG_CUR -6500
-  #define MAX_CHG_VOL 4500
   #define MIN_CHG_VOL 1000
   #define MIN_CCC 10
   #ifdef REGEN_ENABLED
@@ -158,7 +180,6 @@ const char vers[] = "2.0-12202019";
     #define MAX_DIS_CUR 5000
   #endif
   #define MIN_DIS_VOL 700
-  #define MAX_DIS_VOL 4300
   #define MINBUCKDUTY 1
   #define MAXBUCKDUTY 397
   #define MAX_VBUF 12600
@@ -174,18 +195,26 @@ const char vers[] = "2.0-12202019";
   #define OC1ON PA9 //Buck disable, active low (0 = buck disabled)
   #define OC2PF PA10 //Buck FET control output, positive logic; higher PWM duty = higher output voltage
   #define OC2ON PB8 //Buck disable, active low (0 = buck disabled)
+  #ifdef V_1S
+    #define OVV_THRESH 4370
+    #define MAX_CHG_VOL 4500
+    #define MAX_DIS_VOL 4300
+  #endif
+  #ifdef V_2S1
+    #define OVV_THRESH 4370
+    #define MAX_CHG_VOL 4500
+    #define MAX_DIS_VOL 4300
+  #endif
+  #ifdef V_2S
+    #define OVV_THRESH 8770
+    #define MAX_CHG_VOL 8700
+    #define MAX_DIS_VOL 8400
+  #endif
 #endif
 #define DEF_DIS_MODE 0
 #define DEF_PSU_MODE 1
 #define DEF_CYCLES 1
 #define OVT_THRESH 45
-#ifdef V_1S
-  #define OVV_THRESH 4370
-#endif
-#ifdef V_2S
-  #define OVV_THRESH 4370
-  //#define OVV_THRESH 8770
-#endif
 #define LED_BRIGHTNESS 80 //1-255 for LED brightness
 #define NIMH_DV 10
 #define DEF_CELL_TYPE 0
@@ -239,6 +268,10 @@ volatile float REFAVAL = REFAVALINIT;
   #define ADC2V2INIT 846.281f
 #endif
 #ifdef V_2S //430k/150k 0-9.46V
+  #define ADC2V1INIT 432.981f
+  #define ADC2V2INIT 432.981f
+#endif
+#ifdef V_2S1 //430k/150k 0-9.46V
   #define ADC2V1INIT 432.981f
   #define ADC2V2INIT 432.981f
 #endif
