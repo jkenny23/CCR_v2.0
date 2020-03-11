@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <Adafruit_NeoPixel-ANDnXOR.h>
 #include <EEPROM.h>
+#include "serial_support.h"
 
 // Hardware Configurations:
 // HW 2.0 - First CCR v2 HW using individual N- and P- gate drivers, max current 3A from 12V, 3.5A from 5V
@@ -24,8 +25,9 @@
 //#define REGEN_ENABLED
 //#define MON_SHUNT
 //#define V_1S //220k/150k 0-4.84V
-//#define V_2S //430k/150k 0-9.46V, 2s charging allowed
-#define V_2S1 //430k/150k 0-9.46V, only 1s charging allowed
+#define V_2S //430k/150k 0-9.46V, 2s charging allowed
+//#define V_2S1 //430k/150k 0-9.46V, only 1s charging allowed
+#define LP //Low power, 4A limit, 1.65A shunt, 90kHz Fsw
 
 #ifdef OLED_ENABLED
   #include <Adafruit_GFX_AS.h>
@@ -37,14 +39,6 @@
     #error("Height incorrect, please fix Adafruit_SSD1306.h!");
   #endif
 #endif
-
-/*#if defined(__arm__)
-  extern "C" char* sbrk(int incr);
-  static int FreeStack() {
-    char top = 't';
-    return &top - reinterpret_cast<char*>(sbrk(0));
-  }
-#endif*/
 
 volatile int interruptCounter;
 
@@ -171,17 +165,33 @@ const char vers[] = "2.0-02252020";
   #endif
 #endif
 #ifdef HW_2_4
-  #define MAX_CHG_CUR -6500
+  #ifdef LP
+    #define MAX_CHG_CUR -1500
+  #else
+    #define MAX_CHG_CUR -6500
+  #endif
   #define MIN_CHG_VOL 1000
   #define MIN_CCC 10
   #ifdef REGEN_ENABLED
-    #define MAX_DIS_CUR 6500
+    #ifdef LP
+      #define MAX_DIS_CUR 1500
+    #else
+      #define MAX_DIS_CUR 6500
+    #endif
   #else
-    #define MAX_DIS_CUR 5000
+    #ifdef LP
+      #define MAX_DIS_CUR 1500
+    #else
+      #define MAX_DIS_CUR 5000
+    #endif
   #endif
   #define MIN_DIS_VOL 700
   #define MINBUCKDUTY 1
-  #define MAXBUCKDUTY 397
+  #ifdef LP
+    #define MAXBUCKDUTY 794
+  #else
+    #define MAXBUCKDUTY 397
+  #endif
   #define MAX_VBUF 12600
   #define DEF_CHG_CUR -1500
   #define DEF_CHG_VOL 4200
@@ -224,6 +234,8 @@ volatile int16 charge_current_1 = -1500;
 volatile uint16 charge_voltage_1 = 4200;
 volatile uint16 discharge_current_1 = 1500;
 volatile uint16 discharge_voltage_1 = 2700;
+//volatile int16 charge_power_1 = -1500;
+//volatile uint16 discharge_power_1 = 1500;
 volatile uint16 ccc_1 = 50; //Charge CC cutoff in mA (50mA)
 volatile uint16 num_cycles_1 = 1;
 volatile uint8 discharge_mode_1 = 0;
@@ -279,14 +291,22 @@ volatile float REFAVAL = REFAVALINIT;
 //EEPROM address for slot 1 current value: 3
 #define ADC2I1ADDR 3
 #ifndef MON_SHUNT
-  #define ADC2I1INIT 310.303f
+  #ifdef LP
+    #define ADC2I1INIT 1241.212f //20m shunt
+  #else
+    #define ADC2I1INIT 310.303f //5m shunt
+  #endif
 #endif
 #ifdef MON_SHUNT
-  #define ADC2I1INIT 124.121f
+  #define ADC2I1INIT 124.121f //2m shunt
 #endif
 //EEPROM address for slot 2 current value: 4
 #define ADC2I2ADDR 4
-#define ADC2I2INIT 310.303f
+#ifdef LP
+  #define ADC2I2INIT 1241.212f
+#else
+  #define ADC2I2INIT 310.303f
+#endif
 //EEPROM address for buffer current value: 5
 #define BUF2VADDR 5
 #define BUF2VINIT 3.22266f //x/4096*3.3*1000*4
@@ -683,8 +703,7 @@ void setChg2(unsigned char state) {
   }
 }
 
-void presetDuty1(void)
-{
+void presetDuty1(void) {
   unsigned int inputV;
   unsigned int cellV;
   
@@ -698,8 +717,7 @@ void presetDuty1(void)
     initbuckduty1 = MAXBUCKDUTY;
 }
 
-void presetDuty2(void)
-{
+void presetDuty2(void) {
   unsigned int inputV;
   unsigned int cellV;
   
@@ -713,168 +731,98 @@ void presetDuty2(void)
     initbuckduty2 = MAXBUCKDUTY;
 }
 
-void pauseInts(void)
-{
+void pauseInts(void) {
   Timer1.pause();
   Timer4.pause();
   Timer2.pause();
 }
 
-void resumeInts(void)
-{
+void resumeInts(void) {
   Timer1.resume();
   Timer4.resume();
   Timer2.resume();
 }
 
 void setLED1(unsigned char color) {
-/*#define OFF 0
-#define RED 1
-#define YELLOW 2
-#define GREEN 3
-#define CYAN 4
-#define BLUE 5
-#define PURPLE 6*/
   switch (color)
   {
     case LED_OFF:
       leds.setPixelColor(0,0,0,0);
       leds.show();
-      //digitalWrite(LED1R, LOW);
-      //digitalWrite(LED1G, LOW);
-      //digitalWrite(LED1B, LOW);
       break;
     case LED_RED:
       leds.setPixelColor(0,LED_BRIGHTNESS,0,0);
       leds.show();
-      //digitalWrite(LED1R, HIGH);
-      //digitalWrite(LED1G, LOW);
-      //digitalWrite(LED1B, LOW);
       break;
     case LED_YELLOW:
       leds.setPixelColor(0,LED_BRIGHTNESS,LED_BRIGHTNESS,0);
       leds.show();
-      //digitalWrite(LED1R, HIGH);
-      //digitalWrite(LED1G, HIGH);
-      //digitalWrite(LED1B, LOW);
       break;
     case LED_GREEN:
       leds.setPixelColor(0,0,LED_BRIGHTNESS,0);
       leds.show();
-      //digitalWrite(LED1R, LOW);
-      //digitalWrite(LED1G, HIGH);
-      //digitalWrite(LED1B, LOW);
       break;
     case LED_CYAN:
       leds.setPixelColor(0,0,LED_BRIGHTNESS,LED_BRIGHTNESS);
       leds.show();
-      //digitalWrite(LED1R, LOW);
-      //digitalWrite(LED1G, HIGH);
-      //digitalWrite(LED1B, HIGH);
       break;
     case LED_BLUE:
       leds.setPixelColor(0,0,0,LED_BRIGHTNESS);
       leds.show();
-      //digitalWrite(LED1R, LOW);
-      //digitalWrite(LED1G, LOW);
-      //digitalWrite(LED1B, HIGH);
       break;
     case LED_PURPLE:
       leds.setPixelColor(0,LED_BRIGHTNESS,0,LED_BRIGHTNESS);
       leds.show();
-      //digitalWrite(LED1R, HIGH);
-      //digitalWrite(LED1G, LOW);
-      //digitalWrite(LED1B, HIGH);
       break;
     case LED_WHITE:
       leds.setPixelColor(0,LED_BRIGHTNESS,LED_BRIGHTNESS,LED_BRIGHTNESS);
       leds.show();
-      //digitalWrite(LED1R, HIGH);
-      //digitalWrite(LED1G, LOW);
-      //digitalWrite(LED1B, HIGH);
       break;
     default:
       leds.setPixelColor(0,0,0,0);
       leds.show();
-      //digitalWrite(LED1R, LOW);
-      //digitalWrite(LED1G, LOW);
-      //digitalWrite(LED1B, LOW);
       break;
   }
 }
 
 void setLED2(unsigned char color) {
-/*#define OFF 0
-#define RED 1
-#define YELLOW 2
-#define GREEN 3
-#define CYAN 4
-#define BLUE 5
-#define PURPLE 6*/
   switch (color)
   {
     case LED_OFF:
       leds.setPixelColor(1,0,0,0);
       leds.show();
-      //digitalWrite(LED2R, LOW);
-      //digitalWrite(LED2G, LOW);
-      //digitalWrite(LED2B, LOW);
       break;
     case LED_RED:
       leds.setPixelColor(1,LED_BRIGHTNESS,0,0);
       leds.show();
-      //digitalWrite(LED2R, HIGH);
-      //digitalWrite(LED2G, LOW);
-      //digitalWrite(LED2B, LOW);
       break;
     case LED_YELLOW:
       leds.setPixelColor(1,LED_BRIGHTNESS,LED_BRIGHTNESS,0);
       leds.show();
-      //digitalWrite(LED2R, HIGH);
-      //digitalWrite(LED2G, HIGH);
-      //digitalWrite(LED2B, LOW);
       break;
     case LED_GREEN:
       leds.setPixelColor(1,0,LED_BRIGHTNESS,0);
       leds.show();
-      //digitalWrite(LED2R, LOW);
-      //digitalWrite(LED2G, HIGH);
-      //digitalWrite(LED2B, LOW);
       break;
     case LED_CYAN:
       leds.setPixelColor(1,0,LED_BRIGHTNESS,LED_BRIGHTNESS);
       leds.show();
-      //digitalWrite(LED2R, LOW);
-      //digitalWrite(LED2G, HIGH);
-      //digitalWrite(LED2B, HIGH);
       break;
     case LED_BLUE:
       leds.setPixelColor(1,0,0,LED_BRIGHTNESS);
       leds.show();
-      //digitalWrite(LED2R, LOW);
-      //digitalWrite(LED2G, LOW);
-      //digitalWrite(LED2B, HIGH);
       break;
     case LED_PURPLE:
       leds.setPixelColor(1,LED_BRIGHTNESS,0,LED_BRIGHTNESS);
       leds.show();
-      //digitalWrite(LED2R, HIGH);
-      //digitalWrite(LED2G, LOW);
-      //digitalWrite(LED2B, HIGH);
       break;
     case LED_WHITE:
       leds.setPixelColor(1,LED_BRIGHTNESS,LED_BRIGHTNESS,LED_BRIGHTNESS);
       leds.show();
-      //digitalWrite(LED2R, HIGH);
-      //digitalWrite(LED2G, HIGH);
-      //digitalWrite(LED2B, HIGH);
       break;
     default:
       leds.setPixelColor(1,0,0,0);
       leds.show();
-      //digitalWrite(LED2R, LOW);
-      //digitalWrite(LED2G, LOW);
-      //digitalWrite(LED2B, LOW);
       break;
   }
 }
@@ -910,17 +858,25 @@ void setup() {
   setLED1(LED_OFF);
   setLED2(LED_OFF);
 
+  //Timer1 = A8, (A9, )A10 used for buck PWM
   Timer1.pause();
-  //timer.setChannel1Mode(TIMER_OUTPUT_COMPARE);
   Timer1.setPrescaleFactor(1);
-  Timer1.setOverflow(400);
+  #ifdef LP
+    Timer1.setOverflow(800); //180kHz = 400, 90kHz = 800
+  #else
+    Timer1.setOverflow(400); //180kHz = 400, 90kHz = 800
+  #endif
   Timer1.refresh();
   Timer1.resume();
 
+  //Timer4 = B6, B7(, B8) used for CC load
   Timer4.pause();
-  //timer.setChannel1Mode(TIMER_OUTPUT_COMPARE);
   Timer4.setPrescaleFactor(1);
-  Timer4.setOverflow(400);
+  #ifdef LP
+    Timer4.setOverflow(800); //180kHz = 400, 90kHz = 800
+  #else
+    Timer4.setOverflow(400); //180kHz = 400, 90kHz = 800
+  #endif
   Timer4.refresh();
   Timer4.resume();
 
@@ -933,41 +889,44 @@ void setup() {
   Timer2.attachCompare1Interrupt(handler_loop);
   Timer2.refresh(); //Refresh the timer's count, prescale, and overflow
   delay(5000);
-  //Timer2.resume(); //Start the timer counting
 
   #ifdef OLED_ENABLED
-    // by default, we'll generate the high voltage from the 3.3v line internally! (neat!)
     display.begin(SSD1306_SWITCHCAPVCC, 0x3C);  // initialize with the I2C addr 0x3C (for the 128x32)
   
-    // init done
     // Clear the buffer.
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(1);
-    //display.display();
   #endif
 
   #ifdef HW_1_0
-  Serial.print("HW Cfg: 1.0");
+  Serial.print("> HW Cfg: 1.0");
   #endif
   #ifdef HW_2_0
-  Serial.print("HW Cfg: 2.0");
+  Serial.print("> HW Cfg: 2.0");
   #endif
   #ifdef HW_2_4
-  Serial.print("HW Cfg: 2.4");
+  Serial.print("> HW Cfg: 2.4");
   #endif
   #ifdef MON_SHUNT
   Serial.print("_Mon");
   #endif
   #ifdef V_1S
-  Serial.println("_1s");
+  Serial.print("_1s");
   #endif
   #ifdef V_2S
-  Serial.println("_2s");
+  Serial.print("_2s");
+  #endif
+  #ifdef V_2S1
+  Serial.print("_2s1");
+  #endif
+  #ifdef LP
+  Serial.print("_LP");
   #endif
   #ifdef OLED_ENABLED
-  Serial.println("OLED Enabled");
+  Serial.println(" OLED Enabled");
   #endif
+  Serial.println("");
 
   estatus = EEPROM.init();
   if(estatus != 0)
@@ -1119,7 +1078,7 @@ void setup() {
   Serial.println(vers);
   adciref = (uint32)((float)adciref/1000.0); //Iref voltage
   
-  printMenu(mode1);
+  printMenu(mode1, Serial);
   
   Timer2.resume(); //Start the timer counting
 }
@@ -1214,131 +1173,6 @@ void recvWithStartEndMarkers() {
       Serial.print("\r\n");
       Serial.print("> ");
     }
-  }
-}
-
-int fast_atoi_leading_pos( const char * p )
-{
-    int x = 0;
-    ++p;
-    while (*p >= '0' && *p <= '9') {
-        x = (x*10) + (*p - '0');
-        ++p;
-    }
-    return x;
-}
-
-int fast_atoi_leading_neg( const char * p )
-{
-    int x = 0;
-    bool neg = false;
-    ++p;
-    if (*p == '-') {
-        neg = true;
-        ++p;
-    }
-    while (*p >= '0' && *p <= '9') {
-        x = (x*10) + (*p - '0');
-        ++p;
-    }
-    if (neg) {
-        x = -x;
-    }
-    return x;
-}
-
-void printMenu(uint8 menu2) 
-{
-  switch (menu2) {
-    case 0:
-      Serial.print("\r\n");
-      Serial.println("> Charging");
-      Serial.println(">  Press n to end");
-      Serial.print("\r\n");
-      Serial.print("> ");
-      break;
-    case 1:
-      Serial.print("\r\n");
-      Serial.println("> Discharging");
-      Serial.println(">  Press n to end");
-      Serial.print("\r\n");
-      Serial.print("> ");
-      break;
-    case 2:
-      Serial.print("\r\n");
-      Serial.println("> Cycle Testing");
-      Serial.println(">  Press n to end");
-      Serial.print("\r\n");
-      Serial.print("> ");
-      break;
-    case 3:
-      Serial.print("\r\n");
-      Serial.println("> PSU Mode");
-      Serial.println(">  Press n to end");
-      Serial.print("\r\n");
-      Serial.print("> ");
-      break;
-    case 4:
-      Serial.print("\r\n");
-      Serial.println("> Test Mode");
-      Serial.println(">  Press n to end");
-      Serial.print("\r\n");
-      Serial.print("> ");
-      break;
-    case 6:
-      Serial.print("\r\n");
-      Serial.println("> IR Test");
-      Serial.println(">  Press n to end");
-      Serial.print("\r\n");
-      Serial.print("> ");
-      break;
-    default:
-      //'c', 'd', 'y', 'p', 't', 'n', '?', 'v', 's', 'l', 'r', 'z', 'q', 'a'
-      Serial.print("\r\n");
-      Serial.println("> Select Mode:");
-      Serial.println(">  Charge");
-      Serial.println(">   c[1-2] i[charge current, mA] v[charge voltage, mV] o[cutoff current, mA] n[cell type: 0 = Li, 1 = Ni]");
-      Serial.println(">            100-1500, def.1500    2400-4500, def.4200   50-250, def.50        def.0");
-      Serial.println(">  Discharge");
-      Serial.println(">   d[1-2] i[dis current, mA] v[cutoff voltage, mV] m[mode: 0 = constant, 1 = stepped]");
-      Serial.println(">            100-1500, def.1500 700-3900, def.2700    def.0");
-      Serial.println(">          r[dir: 0 = resistive, 2 = regen]");
-      Serial.println(">            def.0");
-      Serial.println(">  Cycle");
-      Serial.println(">   y[1-2] i[dis current, mA] v[cutoff voltage, mV] m[mode: 0 = constant, 1 = stepped]");
-      Serial.println(">            100-1500, def.1500 700-3900, def.2700    def.0");
-      Serial.println(">          k[charge current, mA] u[charge voltage, mV] o[cutoff current, mA] l[number of cycles]");
-      Serial.println(">            100-1500, def.1500    2400-4500, def.4200   50-250, def.50        def.1");
-      Serial.println(">          r[dir: 0 = resistive, 2 = regen] n[cell type: 0 = Li, 1 = Ni]");
-      Serial.println(">            def.0                            def.0");
-      Serial.println(">  Power Supply");
-      Serial.println(">   p[1-2] r[dir: 0 = resistive, 1 = buck, 2 = regen] v[voltage setting, mV] i[current limit, mA]");
-      Serial.println(">            def.1                                      0-9500, def.4200       50-1500, def.1500");
-      Serial.println(">          o[cutoff current, mA]");
-      Serial.println(">           50-250, def.50");
-      Serial.println(">  Cal R/W Mode");
-      Serial.println(">   t[r/w] a[address: 0-999] d[data, unsigned int (0-65535)]");
-      Serial.println(">  IR Test Mode");
-      Serial.println(">   r[1-2] i[test current, mA] r[direction: 0 = resistive, 2 = regen]");
-      Serial.println(">            100-1500, def.1500  def.0");
-      Serial.println(">  Test Mode (raw PWM duty)");
-      Serial.println(">   q[1-2] l[duty cycle (0-399)] r[direction: 0 = resistive, 2 = regen]");
-      Serial.println(">            0-399                 def.0");
-      Serial.println(">  Help (Prints this menu)");
-      Serial.println(">   ?");
-      Serial.println(">  Stop current mode/test");
-      Serial.println(">   n[1-2]");
-      Serial.println(">  Version");
-      Serial.println(">   v");
-      Serial.println(">  Soft Reset");
-      Serial.println(">   z");
-      Serial.println(">  OLED En/Disable (Toggle)");
-      Serial.println(">   a");
-      Serial.println(">  Status");
-      Serial.println(">   s");
-      Serial.print("\r\n");
-      Serial.print("> ");
-      break;
   }
 }
 
@@ -1463,8 +1297,8 @@ void parseDischarge1(uint8 nArgs, char* args[])
           strVal = fast_atoi_leading_pos(args[i]);
           if(strVal>MAX_DIS_CUR)
             strVal = MAX_DIS_CUR;
-          else if(strVal<100)
-            strVal = 100;
+          else if(strVal<30)
+            strVal = 30;
           discharge_current_1 = strVal;
           Serial.print(discharge_current_1);
           Serial.println("mA");
@@ -1571,8 +1405,8 @@ void parseIR1(uint8 nArgs, char* args[])
           strVal = fast_atoi_leading_pos(args[i]);
           if(strVal>MAX_DIS_CUR)
             strVal = MAX_DIS_CUR;
-          else if(strVal<100)
-            strVal = 100;
+          else if(strVal<30)
+            strVal = 30;
           discharge_current_1 = strVal;
           Serial.print(discharge_current_1);
           Serial.println("mA");
@@ -1835,8 +1669,8 @@ void parseCycle1(uint8 nArgs, char* args[])
           strVal = fast_atoi_leading_pos(args[i]);
           if(strVal>MAX_DIS_CUR)
             strVal = MAX_DIS_CUR;
-          else if(strVal<100)
-            strVal = 100;
+          else if(strVal<30)
+            strVal = 30;
           discharge_current_1 = strVal;
           Serial.print(discharge_current_1);
           Serial.println("mA");
@@ -1870,8 +1704,8 @@ void parseCycle1(uint8 nArgs, char* args[])
           strVal = -1*fast_atoi_leading_pos(args[i]);
           if(strVal<MAX_CHG_CUR)
             strVal = MAX_CHG_CUR;
-          else if(strVal>-100)
-            strVal = -100;
+          else if(strVal>-30)
+            strVal = -30;
           charge_current_1 = strVal;
           Serial.print(charge_current_1);
           Serial.println("mA");
@@ -1892,8 +1726,8 @@ void parseCycle1(uint8 nArgs, char* args[])
           strVal = fast_atoi_leading_pos(args[i]);
           if(strVal<MIN_CCC)
             strVal = MIN_CCC;
-          else if(strVal>1000)
-            strVal = 1000;
+          else if(strVal>2000)
+            strVal = 2000;
           ccc_1 = strVal;
           Serial.print(ccc_1);
           Serial.println("mA");
@@ -2033,8 +1867,8 @@ void parseCharge2(uint8 nArgs, char* args[])
           strVal = -1*fast_atoi_leading_pos(args[i]);
           if(strVal<MAX_CHG_CUR)
             strVal = MAX_CHG_CUR;
-          else if(strVal>-100)
-            strVal = -100;
+          else if(strVal>-30)
+            strVal = -30;
           charge_current_2 = strVal;
           Serial.print(charge_current_2);
           Serial.println("mA");
@@ -2055,8 +1889,8 @@ void parseCharge2(uint8 nArgs, char* args[])
           strVal = fast_atoi_leading_pos(args[i]);
           if(strVal<MIN_CCC)
             strVal = MIN_CCC;
-          else if(strVal>1000)
-            strVal = 1000;
+          else if(strVal>2000)
+            strVal = 2000;
           ccc_2 = strVal;
           Serial.print(ccc_2);
           Serial.println("mA");
@@ -2131,8 +1965,8 @@ void parseDischarge2(uint8 nArgs, char* args[])
           strVal = fast_atoi_leading_pos(args[i]);
           if(strVal>MAX_DIS_CUR)
             strVal = MAX_DIS_CUR;
-          else if(strVal<100)
-            strVal = 100;
+          else if(strVal<30)
+            strVal = 30;
           discharge_current_2 = strVal;
           Serial.print(discharge_current_2);
           Serial.println("mA");
@@ -2240,8 +2074,8 @@ void parseIR2(uint8 nArgs, char* args[])
           strVal = fast_atoi_leading_pos(args[i]);
           if(strVal>MAX_DIS_CUR)
             strVal = MAX_DIS_CUR;
-          else if(strVal<100)
-            strVal = 100;
+          else if(strVal<30)
+            strVal = 30;
           discharge_current_2 = strVal;
           Serial.print(discharge_current_2);
           Serial.println("mA");
@@ -2318,8 +2152,8 @@ void parsePSU2(uint8 nArgs, char* args[])
           strVal = fast_atoi_leading_pos(args[i]);
           if(strVal>MAX_DIS_CUR)
             strVal = MAX_DIS_CUR;
-          else if(strVal<50)
-            strVal = 50;
+          else if(strVal<30)
+            strVal = 30;
           discharge_current_2 = strVal;
           charge_current_2 = -1*strVal;
           Serial.print(discharge_current_2);
@@ -2514,8 +2348,8 @@ void parseCycle2(uint8 nArgs, char* args[])
           strVal = fast_atoi_leading_pos(args[i]);
           if(strVal>MAX_DIS_CUR)
             strVal = MAX_DIS_CUR;
-          else if(strVal<100)
-            strVal = 100;
+          else if(strVal<30)
+            strVal = 30;
           discharge_current_2 = strVal;
           Serial.print(discharge_current_2);
           Serial.println("mA");
@@ -2549,8 +2383,8 @@ void parseCycle2(uint8 nArgs, char* args[])
           strVal = -1*fast_atoi_leading_pos(args[i]);
           if(strVal<MAX_CHG_CUR)
             strVal = MAX_CHG_CUR;
-          else if(strVal>-100)
-            strVal = -100;
+          else if(strVal>-30)
+            strVal = -30;
           charge_current_2 = strVal;
           Serial.print(charge_current_2);
           Serial.println("mA");
@@ -2571,8 +2405,8 @@ void parseCycle2(uint8 nArgs, char* args[])
           strVal = fast_atoi_leading_pos(args[i]);
           if(strVal<MIN_CCC)
             strVal = MIN_CCC;
-          else if(strVal>1000)
-            strVal = 1000;
+          else if(strVal>2000)
+            strVal = 2000;
           ccc_2 = strVal;
           Serial.print(ccc_2);
           Serial.println("mA");
@@ -3859,7 +3693,7 @@ void loop() {
             //Timer2.resume(); //Start the timer counting
             setChg1(CHARGE);
             setLED1(LED_CYAN);
-            printMenu(mode1);
+            printMenu(mode1, Serial);
           }
         }
         else if(args[0][1] == '2')
@@ -3897,7 +3731,7 @@ void loop() {
             //Timer2.resume(); //Start the timer counting
             setChg2(CHARGE);
             setLED2(LED_CYAN);
-            printMenu(mode2);
+            printMenu(mode2, Serial);
           }
         }
         break;
@@ -3936,7 +3770,7 @@ void loop() {
                 setChg1(DISCHARGE);
             #endif
             setLED1(LED_YELLOW);
-            printMenu(mode1);
+            printMenu(mode1, Serial);
           }
         }
         else if(args[0][1] == '2')
@@ -3973,7 +3807,7 @@ void loop() {
                 setChg2(DISCHARGE);
             #endif
             setLED2(LED_YELLOW);
-            printMenu(mode2);
+            printMenu(mode2, Serial);
           }
         }
         break;
@@ -3996,7 +3830,7 @@ void loop() {
             ir1 = 0;
             //Timer2.resume(); //Start the timer counting
             setLED1(LED_PURPLE);
-            printMenu(mode1);
+            printMenu(mode1, Serial);
           }
         }
         else if(args[0][1] == '2')
@@ -4017,7 +3851,7 @@ void loop() {
             ir2 = 0;
             //Timer2.resume(); //Start the timer counting
             setLED2(LED_PURPLE);
-            printMenu(mode2);
+            printMenu(mode2, Serial);
           }
         }
         break;
@@ -4058,7 +3892,7 @@ void loop() {
             //Timer2.resume(); //Start the timer counting
             setChg1(CHARGE);
             setLED1(LED_CYAN);
-            printMenu(mode1);
+            printMenu(mode1, Serial);
           }
         }
         else if(args[0][1] == '2')
@@ -4097,7 +3931,7 @@ void loop() {
             //Timer2.resume(); //Start the timer counting
             setChg2(CHARGE);
             setLED2(LED_CYAN);
-            printMenu(mode2);
+            printMenu(mode2, Serial);
           }
         }
         break;
@@ -4163,7 +3997,7 @@ void loop() {
                 setLED1(LED_YELLOW);
               }
             #endif
-            printMenu(mode1);
+            printMenu(mode1, Serial);
           }
         }
         else if(args[0][1] == '2')
@@ -4227,7 +4061,7 @@ void loop() {
                 setLED2(LED_YELLOW);
               }
             #endif
-            printMenu(mode2);
+            printMenu(mode2, Serial);
           }
         }
         break;
@@ -4449,7 +4283,7 @@ void loop() {
       #endif
       case '?':
         mode1 = 99;
-        printMenu(mode1);
+        printMenu(mode1, Serial);
         //Timer2.pause(); //Start the timer counting
         break;
       case 'z':
@@ -4458,7 +4292,7 @@ void loop() {
         break;
       default:
         mode1 = 99;
-        printMenu(mode1);
+        printMenu(mode1, Serial);
         //Timer2.pause(); //Start the timer counting
         break;
     }
