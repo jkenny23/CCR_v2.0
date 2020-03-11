@@ -1199,8 +1199,8 @@ void parseCharge1(uint8 nArgs, char* args[])
           strVal = -1*fast_atoi_leading_pos(args[i]);
           if(strVal<MAX_CHG_CUR)
             strVal = MAX_CHG_CUR;
-          else if(strVal>-100)
-            strVal = -100;
+          else if(strVal>-30)
+            strVal = -30;
           charge_current_1 = strVal;
           Serial.print(charge_current_1);
           Serial.println("mA");
@@ -1221,8 +1221,8 @@ void parseCharge1(uint8 nArgs, char* args[])
           strVal = fast_atoi_leading_pos(args[i]);
           if(strVal<MIN_CCC)
             strVal = MIN_CCC;
-          else if(strVal>1000)
-            strVal = 1000;
+          else if(strVal>2000)
+            strVal = 2000;
           ccc_1 = strVal;
           Serial.print(ccc_1);
           Serial.println("mA");
