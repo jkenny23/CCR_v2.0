@@ -22,12 +22,13 @@
 //#define HW_1_0
 //#define HW_2_0
 #define HW_2_4
+#define DEBUG_MODE
 //#define REGEN_ENABLED
 //#define MON_SHUNT
 //#define V_1S //220k/150k 0-4.84V
 #define V_2S //430k/150k 0-9.46V, 2s charging allowed
 //#define V_2S1 //430k/150k 0-9.46V, only 1s charging allowed
-#define LP //Low power, 4A limit, 1.65A shunt, 90kHz Fsw
+//#define LP //Low power, 4A limit, 1.65A shunt, 90kHz Fsw
 
 #ifdef OLED_ENABLED
   #include <Adafruit_GFX_AS.h>
@@ -89,6 +90,7 @@ const char vers[] = "2.0-02252020";
 //Pin definitions - Digital inputs
 #define S1 PB9 //Switch 1
 #define S2 PC13 //Switch 2
+#define DEF_TIMEOUT 14400
 #ifdef HW_1_0
   #define MAX_CHG_CUR -1500
   #define MAX_CHG_VOL 4500
@@ -171,7 +173,7 @@ const char vers[] = "2.0-02252020";
     #define MAX_CHG_CUR -6500
   #endif
   #define MIN_CHG_VOL 1000
-  #define MIN_CCC 10
+  #define MIN_CCC 5
   #ifdef REGEN_ENABLED
     #ifdef LP
       #define MAX_DIS_CUR 1500
@@ -221,6 +223,7 @@ const char vers[] = "2.0-02252020";
     #define MAX_DIS_VOL 8400
   #endif
 #endif
+#define CELLVINC 10
 #define DEF_DIS_MODE 0
 #define DEF_PSU_MODE 1
 #define DEF_CYCLES 1
@@ -231,10 +234,12 @@ const char vers[] = "2.0-02252020";
 #define STARTUP_CYCLES 5 //number of cycles-1 (0.25ms each) to delay before turning on cell
 
 volatile int16 charge_current_1 = -1500;
+volatile int16 charge_current_max_1 = -1500;
 volatile uint16 charge_voltage_1 = 4200;
+volatile uint16 charge_timeout_1 = DEF_TIMEOUT;
 volatile uint16 discharge_current_1 = 1500;
 volatile uint16 discharge_voltage_1 = 2700;
-//volatile int16 charge_power_1 = -1500;
+volatile int16 charge_power_1 = 0;
 //volatile uint16 discharge_power_1 = 1500;
 volatile uint16 ccc_1 = 50; //Charge CC cutoff in mA (50mA)
 volatile uint16 num_cycles_1 = 1;
@@ -243,8 +248,10 @@ volatile uint8 psu_dir_1 = 0;
 volatile uint16 tm_duty_1 = 0;
 volatile int16 charge_current_2 = -1500;
 volatile uint16 charge_voltage_2 = 4200;
+volatile uint16 charge_timeout_2 = DEF_TIMEOUT;
 volatile uint16 discharge_current_2 = 1500;
 volatile uint16 discharge_voltage_2 = 2700;
+volatile int16 charge_power_2 = 0;
 volatile uint16 ccc_2 = 50; //Charge CC cutoff in mA (50mA)
 volatile uint16 num_cycles_2 = 1;
 volatile uint8 discharge_mode_2 = 0;
@@ -1184,8 +1191,10 @@ void parseCharge1(uint8 nArgs, char* args[])
   //Set default charge current/voltage/cutoff
   charge_voltage_1 = DEF_CHG_VOL;
   charge_current_1 = DEF_CHG_CUR;
+  charge_power_1 = 0;
   ccc_1 = DEF_CCC;
   cell1_type = DEF_CELL_TYPE;
+  charge_timeout_1 = DEF_TIMEOUT;
 
   Serial.print("\r\n");
   if(nArgs>1)
@@ -1194,6 +1203,26 @@ void parseCharge1(uint8 nArgs, char* args[])
     {
       switch (args[i][0])
       {
+        case 'w':
+          Serial.print("> Using power: ");
+          strVal = -1*fast_atoi_leading_pos(args[i]);
+          if(strVal<-4000)
+            strVal = -4000;
+          else if(strVal>-30)
+            strVal = -30;
+          charge_power_1 = strVal;
+          Serial.print(charge_power_1);
+          Serial.println("mW");
+          break;
+        case 'e':
+          Serial.print("> Using timeout: ");
+          strVal = fast_atoi_leading_pos(args[i]);
+          if(strVal>65535)
+            strVal = 65535;
+          charge_timeout_1 = strVal;
+          Serial.print(charge_timeout_1);
+          Serial.println("s");
+          break;
         case 'i':
           Serial.print("> Using current: ");
           strVal = -1*fast_atoi_leading_pos(args[i]);
@@ -1202,6 +1231,7 @@ void parseCharge1(uint8 nArgs, char* args[])
           else if(strVal>-30)
             strVal = -30;
           charge_current_1 = strVal;
+          charge_current_max_1 = strVal;
           Serial.print(charge_current_1);
           Serial.println("mA");
           break;
@@ -1246,6 +1276,12 @@ void parseCharge1(uint8 nArgs, char* args[])
     }
   }
   
+  if(charge_timeout_1 == DEF_TIMEOUT)
+  {
+    Serial.print("> Using def timeout: ");
+    Serial.print(charge_timeout_1);
+    Serial.println("s");
+  }
   if(charge_voltage_1 == DEF_CHG_VOL)
   {
     Serial.print("> Using def voltage: ");
@@ -1440,6 +1476,18 @@ void parseIR1(uint8 nArgs, char* args[])
     Serial.print("> Using def current: ");
     Serial.print(discharge_current_1);
     Serial.println("mA");
+  }
+  if(psu_dir_1 == DEF_PSU_MODE)
+  {
+    Serial.print("> Using def mode: ");
+    if(psu_dir_1 == 0)
+    {
+      Serial.println("Resistive");
+    }
+    else
+    {
+      Serial.println("Regen");
+    }
   }
 }
 
@@ -1650,6 +1698,7 @@ void parseCycle1(uint8 nArgs, char* args[])
   ccc_1 = DEF_CCC;
   num_cycles_1 = DEF_CYCLES;
   cell1_type = DEF_CELL_TYPE;
+  charge_power_1 = DEF_TIMEOUT;
   
   //Cycle
   // y i[discharge current, mA] v[cutoff voltage, mV] m[mode: 0 = constant current, 1 = stepped]
@@ -1664,6 +1713,15 @@ void parseCycle1(uint8 nArgs, char* args[])
     {
       switch (args[i][0])
       {
+        case 'e':
+          Serial.print("> Using timeout: ");
+          strVal = fast_atoi_leading_pos(args[i]);
+          if(strVal>65535)
+            strVal = 65535;
+          charge_timeout_1 = strVal;
+          Serial.print(charge_timeout_1);
+          Serial.println("s");
+          break;
         case 'i':
           Serial.print("> Using current: ");
           strVal = fast_atoi_leading_pos(args[i]);
@@ -1779,6 +1837,12 @@ void parseCycle1(uint8 nArgs, char* args[])
     }
   }
   
+  if(charge_timeout_1 == DEF_TIMEOUT)
+  {
+    Serial.print("> Using def timeout: ");
+    Serial.print(charge_timeout_1);
+    Serial.println("s");
+  }
   if(discharge_voltage_1 == DEF_DIS_VOL)
   {
     Serial.print("> Using def voltage: ");
@@ -1854,6 +1918,7 @@ void parseCharge2(uint8 nArgs, char* args[])
   charge_current_2 = DEF_CHG_CUR;
   ccc_2 = DEF_CCC;
   cell2_type = DEF_CELL_TYPE;
+  charge_timeout_2 = DEF_TIMEOUT;
 
   Serial.print("\r\n");
   if(nArgs>1)
@@ -1862,6 +1927,15 @@ void parseCharge2(uint8 nArgs, char* args[])
     {
       switch (args[i][0])
       {
+        case 'e':
+          Serial.print("> Using timeout: ");
+          strVal = fast_atoi_leading_pos(args[i]);
+          if(strVal>65535)
+            strVal = 65535;
+          charge_timeout_2 = strVal;
+          Serial.print(charge_timeout_2);
+          Serial.println("s");
+          break;
         case 'i':
           Serial.print("> Using current: ");
           strVal = -1*fast_atoi_leading_pos(args[i]);
@@ -1914,6 +1988,12 @@ void parseCharge2(uint8 nArgs, char* args[])
     }
   }
   
+  if(charge_timeout_2 == DEF_TIMEOUT)
+  {
+    Serial.print("> Using def timeout: ");
+    Serial.print(charge_timeout_2);
+    Serial.println("s");
+  }
   if(charge_voltage_2 == DEF_CHG_VOL)
   {
     Serial.print("> Using def voltage: ");
@@ -2110,10 +2190,10 @@ void parseIR2(uint8 nArgs, char* args[])
     Serial.print(discharge_current_2);
     Serial.println("mA");
   }
-  if(psu_dir_1 == DEF_PSU_MODE)
+  if(psu_dir_2 == DEF_PSU_MODE)
   {
     Serial.print("> Using def mode: ");
-    if(psu_dir_1 == 0)
+    if(psu_dir_2 == 0)
     {
       Serial.println("Resistive");
     }
@@ -2329,6 +2409,7 @@ void parseCycle2(uint8 nArgs, char* args[])
   ccc_2 = DEF_CCC;
   num_cycles_2 = DEF_CYCLES;
   cell2_type = DEF_CELL_TYPE;
+  charge_power_2 = DEF_TIMEOUT;
   
   //Cycle
   // y i[discharge current, mA] v[cutoff voltage, mV] m[mode: 0 = constant current, 1 = stepped]
@@ -2343,6 +2424,15 @@ void parseCycle2(uint8 nArgs, char* args[])
     {
       switch (args[i][0])
       {
+        case 'e':
+          Serial.print("> Using timeout: ");
+          strVal = fast_atoi_leading_pos(args[i]);
+          if(strVal>65535)
+            strVal = 65535;
+          charge_timeout_2 = strVal;
+          Serial.print(charge_timeout_2);
+          Serial.println("s");
+          break;
         case 'i':
           Serial.print("> Using current: ");
           strVal = fast_atoi_leading_pos(args[i]);
@@ -2458,6 +2548,12 @@ void parseCycle2(uint8 nArgs, char* args[])
     }
   }
   
+  if(charge_timeout_2 == DEF_TIMEOUT)
+  {
+    Serial.print("> Using def timeout: ");
+    Serial.print(charge_timeout_2);
+    Serial.println("s");
+  }
   if(discharge_voltage_2 == DEF_DIS_VOL)
   {
     Serial.print("> Using def voltage: ");
@@ -2542,6 +2638,13 @@ void runStateMachine(void)
   tmpfl = ((float)adcval2) / ADC2V1; //ADC to V = (ADC)/(4096b)*(3.3Vmax)*220/150
   vbat1 += tmpfl; //Accumulate 2000 values for average (result = mV*2)
   vbat_now1 = (int)(tmpfl * 1000 + 0.5); //Multiply by 1000 for mV, round
+
+  if(charge_power_1 != 0)
+  {
+    charge_current_1 = (int)((float)charge_power_1*1000.0/vbat_now1);
+    if(charge_current_1 < charge_current_max_1)
+      charge_current_1 = charge_current_max_1;
+  }
 
   //Constant current/voltage control loops
   if ((state1 == 3) || (state1 == 4)) //Charging states
@@ -3058,7 +3161,7 @@ void runStateMachine(void)
           if (settle1 > 30) //Wait 30s for current to settle
           {
             state1 = 4;
-            settle1 = 0;
+            //settle1 = 0;
             cell1_vmax = 0;
           }
           break;
@@ -3066,6 +3169,13 @@ void runStateMachine(void)
           //Serial.println("Case 4");
           ibati1 = (int)(ibat_1_1 * -1.0);
           vbati1 = (int)(vbat_1_1);
+          if((mode1 != 3) && (settle1 > charge_timeout_1)) //Timeout exceeded
+          {
+            setChg1(DISCONNECT); //Disconnect/settling state after charge, wait 10 minutes before discharging
+            state1 = 5;
+            settle1 = 0;
+            setLED1(LED_PURPLE);
+          }
           if(vbati1 > cell1_vmax)
             cell1_vmax = vbati1;
           if(cell1_type == 0)
@@ -3430,13 +3540,20 @@ void runStateMachine(void)
           if (settle2 > 30) //Wait 30s for current to settle
           {
             state2 = 4;
-            settle2 = 0;
+            //settle2 = 0;
           }
           break;
         case 4: //Charging state (CC/CV)
           //Serial.println("Case 4");
           ibati2 = (int)(ibat_1_2 * -1.0);
           vbati2 = (int)(vbat_1_2);
+          if((mode2 != 3) && (settle2 > charge_timeout_2)) //Timeout exceeded
+          {
+            setChg2(DISCONNECT); //Disconnect/settling state after charge, wait 10 minutes before discharging
+            state2 = 5;
+            settle2 = 0;
+            setLED2(LED_PURPLE);
+          }
           if(vbati2 > cell2_vmax)
             cell2_vmax = vbati2;
           if(cell2_type == 0)
@@ -3679,8 +3796,8 @@ void loop() {
             parseCharge1(i, args);
             if(charge_voltage_1 < cellV)
             {
-              Serial.print("> Cell V < charge set., increasing to ");
-              charge_voltage_1 = cellV + 100;
+              Serial.print("> Cell V > charge set., increasing to ");
+              charge_voltage_1 = cellV + CELLVINC;
               if(charge_voltage_1 > MAX_CHG_VOL)
                 charge_voltage_1 = MAX_CHG_VOL;
               Serial.print(charge_voltage_1);
@@ -3717,8 +3834,8 @@ void loop() {
             parseCharge2(i, args);
             if(charge_voltage_2 < cellV)
             {
-              Serial.print("> Cell V < charge set., increasing to ");
-              charge_voltage_2 = cellV + 100;
+              Serial.print("> Cell V > charge set., increasing to ");
+              charge_voltage_2 = cellV + CELLVINC;
               if(charge_voltage_2 > MAX_CHG_VOL)
                 charge_voltage_2 = MAX_CHG_VOL;
               Serial.print(charge_voltage_2);
@@ -3877,8 +3994,8 @@ void loop() {
             parseCycle1(i, args);
             if(charge_voltage_1 < cellV)
             {
-              Serial.print("> Cell V < charge set., increasing to ");
-              charge_voltage_1 = cellV + 100;
+              Serial.print("> Cell V > charge set., increasing to ");
+              charge_voltage_1 = cellV + CELLVINC;
               if(charge_voltage_1 > MAX_CHG_VOL)
                 charge_voltage_1 = MAX_CHG_VOL;
               Serial.print(charge_voltage_1);
@@ -3916,8 +4033,8 @@ void loop() {
             parseCycle2(i, args);
             if(charge_voltage_2 < cellV)
             {
-              Serial.print("> Cell V < charge set., increasing to ");
-              charge_voltage_2 = cellV + 100;
+              Serial.print("> Cell V > charge set., increasing to ");
+              charge_voltage_2 = cellV + CELLVINC;
               if(charge_voltage_2 > MAX_CHG_VOL)
                 charge_voltage_2 = MAX_CHG_VOL;
               Serial.print(charge_voltage_2);
@@ -3957,8 +4074,8 @@ void loop() {
             parsePSU1(i, args);
             if(charge_voltage_1 < cellV)
             {
-              Serial.print("> Cell V < PSU set., increasing to ");
-              charge_voltage_1 = cellV + 100;
+              Serial.print("> Cell V > PSU set., increasing to ");
+              charge_voltage_1 = cellV + CELLVINC;
               if(charge_voltage_1 > MAX_CHG_VOL)
                 charge_voltage_1 = MAX_CHG_VOL;
               Serial.print(charge_voltage_1);
@@ -4021,8 +4138,8 @@ void loop() {
             parsePSU2(i, args);
             if(charge_voltage_2 < cellV)
             {
-              Serial.print("> Cell V < PSU set., increasing to ");
-              charge_voltage_2 = cellV + 100;
+              Serial.print("> Cell V > PSU set., increasing to ");
+              charge_voltage_2 = cellV + CELLVINC;
               if(charge_voltage_2 > MAX_CHG_VOL)
                 charge_voltage_2 = MAX_CHG_VOL;
               Serial.print(charge_voltage_2);
@@ -4181,7 +4298,8 @@ void loop() {
         Serial.print("\r\n> ");
         break;
       case 'q':
-        /*if(args[0][1] == '1')
+        #ifdef DEBUG_MODE
+        if(args[0][1] == '1')
         {
           mode1 = 3;
           state1 = 9;
@@ -4200,7 +4318,8 @@ void loop() {
           setChg2(CHARGE);
           pwmWrite(OC2PF, tm_duty_2);
           //printMenu(mode2);
-        }*/
+        }
+        #endif
         break;
       case 's':
         Serial.println("\r\n");
