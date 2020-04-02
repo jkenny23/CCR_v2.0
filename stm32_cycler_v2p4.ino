@@ -22,10 +22,11 @@
 //#define HW_1_0
 //#define HW_2_0
 #define HW_2_4
+//#define DEBUG_MODE
 #define REGEN_ENABLED
 //#define MON_SHUNT
-#define V_1S //220k/150k 0-4.84V
-//#define V_2S //430k/150k 0-9.46V, 2s charging allowed
+//#define V_1S //220k/150k 0-4.84V
+#define V_2S //430k/150k 0-9.46V, 2s charging allowed
 //#define V_2S1 //430k/150k 0-9.46V, only 1s charging allowed
 //#define LP //Low power, 4A limit, 1.65A shunt, 90kHz Fsw
 
@@ -45,6 +46,7 @@ volatile int interruptCounter;
 const char vers[] = "2.0-02252020"; 
 
 #define AFTERDISWAIT 300//300 //300s after charging wait time
+#define CHGSETTLEWAIT 15//30 //30s after starting charge settle time
 #define AFTERCHGWAIT 60//60 //60s after charging wait time
 #define LOOP_PERIOD 500 //In microseconds
 #define CHARGE 1
@@ -250,6 +252,7 @@ volatile uint16 charge_voltage_2 = 4200;
 volatile uint16 charge_timeout_2 = DEF_TIMEOUT;
 volatile uint16 discharge_current_2 = 1500;
 volatile uint16 discharge_voltage_2 = 2700;
+volatile int16 charge_power_2 = 0;
 volatile uint16 ccc_2 = 50; //Charge CC cutoff in mA (50mA)
 volatile uint16 num_cycles_2 = 1;
 volatile uint8 discharge_mode_2 = 0;
@@ -1192,7 +1195,7 @@ void parseCharge1(uint8 nArgs, char* args[])
   charge_power_1 = 0;
   ccc_1 = DEF_CCC;
   cell1_type = DEF_CELL_TYPE;
-  charge_power_1 = DEF_TIMEOUT;
+  charge_timeout_1 = DEF_TIMEOUT;
 
   Serial.print("\r\n");
   if(nArgs>1)
@@ -1696,7 +1699,7 @@ void parseCycle1(uint8 nArgs, char* args[])
   ccc_1 = DEF_CCC;
   num_cycles_1 = DEF_CYCLES;
   cell1_type = DEF_CELL_TYPE;
-  charge_power_1 = DEF_TIMEOUT;
+  charge_power_1 = 0;
   
   //Cycle
   // y i[discharge current, mA] v[cutoff voltage, mV] m[mode: 0 = constant current, 1 = stepped]
@@ -1711,6 +1714,17 @@ void parseCycle1(uint8 nArgs, char* args[])
     {
       switch (args[i][0])
       {
+        case 'w':
+          Serial.print("> Using power: ");
+          strVal = -1*fast_atoi_leading_pos(args[i]);
+          if(strVal<-4000)
+            strVal = -4000;
+          else if(strVal>-30)
+            strVal = -30;
+          charge_power_1 = strVal;
+          Serial.print(charge_power_1);
+          Serial.println("mW");
+          break;
         case 'e':
           Serial.print("> Using timeout: ");
           strVal = fast_atoi_leading_pos(args[i]);
@@ -1916,7 +1930,7 @@ void parseCharge2(uint8 nArgs, char* args[])
   charge_current_2 = DEF_CHG_CUR;
   ccc_2 = DEF_CCC;
   cell2_type = DEF_CELL_TYPE;
-  charge_power_2 = DEF_TIMEOUT;
+  charge_timeout_2 = DEF_TIMEOUT;
 
   Serial.print("\r\n");
   if(nArgs>1)
@@ -3156,7 +3170,7 @@ void runStateMachine(void)
           break;
         case 3: //Charging state (CC)
           //Serial.println("Case 3");
-          if (settle1 > 30) //Wait 30s for current to settle
+          if (settle1 > CHGSETTLEWAIT) //Wait 30s for current to settle
           {
             state1 = 4;
             //settle1 = 0;
@@ -3535,7 +3549,7 @@ void runStateMachine(void)
           break;
         case 3: //Charging state (CC)
           //Serial.println("Case 3");
-          if (settle2 > 30) //Wait 30s for current to settle
+          if (settle2 > CHGSETTLEWAIT) //Wait 30s for current to settle
           {
             state2 = 4;
             //settle2 = 0;
@@ -4296,7 +4310,8 @@ void loop() {
         Serial.print("\r\n> ");
         break;
       case 'q':
-        /*if(args[0][1] == '1')
+        #ifdef DEBUG_MODE
+        if(args[0][1] == '1')
         {
           mode1 = 3;
           state1 = 9;
@@ -4315,7 +4330,8 @@ void loop() {
           setChg2(CHARGE);
           pwmWrite(OC2PF, tm_duty_2);
           //printMenu(mode2);
-        }*/
+        }
+        #endif
         break;
       case 's':
         Serial.println("\r\n");
