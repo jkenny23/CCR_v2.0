@@ -1,0 +1,269 @@
+import argparse
+import sqlite3
+import sys
+import time
+import traceback
+
+from mod_serial import usbSerial
+
+usb_dev = 'COM10'
+#test_line = "y1 i500 k2500 l1 r0"
+test_line = "d1 i1067 v2500"
+
+charge_cmd = 'c1 i6400 e1080'
+wait_sec = 240
+get_status_cmd = 's'
+wait_cmd = 'c1 i1600 o400 e3600'
+discharge_cmd = 'd1 i1600 v2500'
+
+
+class Cycler():
+    def __init__(self):
+        self.device = None
+
+        # TODO total_cyclers hard coded
+        self.total_cyclers = 2
+
+    def init(self):
+        while True:
+            # Connect
+            # ________
+            self.device = usbSerial(usb_dev)
+            try:
+                self.device.connect()
+            except Exception as e:
+                if not self.device:
+                    print("Closing serial")
+                    self.device.close()
+                print("Serial connect failed: {}".format(e))
+                sys.exit()
+            else:
+                print("Connected to serial")
+                break
+
+        while True:
+            # Initialize
+            # ___________
+            try:
+                while not self.sync():
+                    time.sleep(0.1)
+                print("Arduino sync completed")
+            except Exception as e:
+                time.sleep(5)
+                print("Arduino sync failure: {}".format(e))
+            else:
+                print("Synced with arduino")
+                break
+
+    def connect(self):
+        print('Connecting')
+
+        while not self.device.connect():
+            time.sleep(1)
+        print('Connected')
+
+        return True
+
+    def disconnect(self):
+        self.device.sendline("n1\n")
+        self.device.sendline("n2\n")
+        self.device.close()
+
+    # Communicate to arduino, ensure response
+    # ________________________________________
+    def sync(self):
+        if not self.device:
+            raise ("Device not connected, device is: {}".format(self.device))
+
+        print("Sending NL to get a prompt")
+        self.device.sendline("\n")
+
+        print("Fetching received lines")
+        data = self.device.readlines()
+        for line in data:
+            print("Received: {}".format(line))
+
+        print("Sending ? to get menu")
+        self.device.sendline("?\n")
+        time.sleep(0.1)
+
+        data = self.device.readlines()
+        for line in data:
+            print("Received: {}".format(line))
+        for line in data:
+            print("checking: {}".format(line))
+            if '> Select Mode:' in line:
+                print('Initialized')
+                return True
+
+        return False
+
+    # Run
+    # _______________
+    def start_cycle(self, args):
+        try:
+            # Create tables if not don't exist, delete the .db file to create with new fields but you lose te data
+            self.create_tables()
+
+            # Initialize serial device
+            self.init()
+            print('Cycler cycle mode running')
+
+            self.device.sendline(args.testline + "\n")
+
+            while True:
+                if self.device is None:
+                    print("Re-initializing lost comms")
+                    self.init()
+
+                #
+                # check for serial data
+                # _______________
+                for line in self.device.readlines():
+                    if line:
+                        self.process_cycle_data(line)
+
+        except KeyboardInterrupt:
+            self.disconnect()
+
+            print()
+            print("Shutdown completed")
+
+    def create_tables(self):
+
+        self.conn = sqlite3.connect('cell_database.db')
+        self.cur = self.conn.cursor()
+
+        try:
+            self.cur.execute('''CREATE TABLE cell_data
+                        (msg_type integer, millivolt integer, milliamp integer, millamphour real, 
+                         millwatthour real, temp real, state text, time integer)''')
+        except Exception as e:
+            print(e)
+
+    def record_db(self, value_list):
+        if len(value_list) == 0:
+            return
+
+        if value_list[0] in ['0', '1', '2', '5', '6', '7', '9']:
+            try:
+                value_list.append(str(int(time.time())))
+                print('Recording to db: ', value_list)
+                self.cur.execute("INSERT INTO cell_data VALUES (?,?,?,?,?,?,?,?)", value_list)
+            except Exception:
+                self.disconnect()
+                exc_type, exc_value, exc_traceback = sys.exc_info()
+                print(traceback.format_exception(exc_type, exc_value, exc_traceback))
+
+        # Save (commit) the changes
+        self.conn.commit()
+
+    def process_cycle_data(self, line):
+        # Ignore empty lines
+        if len(line) == 0:
+            return [-1]
+        # Ignore remaining menu lines
+        if line[0] == '>':
+            return [-1]
+
+        value_list = line.split(',')
+
+        self.record_db(value_list)
+
+        return value_list
+
+    def process_sequence_data(self, line):
+        pass
+
+    def start_sequence(self, args):
+        # Initialize serial device
+        self.init()
+        print('Cycler sequence mode running')
+
+        try:
+            for cycle_index in range(0, args.repeat):
+                # Create tables if not don't exist, delete the .db file to create with new fields but you lose te data
+                self.create_tables()
+
+                if self.device is None:
+                    print("Re-initializing lost comms")
+                    self.init()
+
+                # Send Charge mode
+                self.device.sendline(charge_cmd + "\n")
+
+                # Process readouts until mode 2 received
+                waiting = True
+                while waiting:
+                    for line in self.device.readlines():
+                        if line and self.process_cycle_data(line)[0] == "2":
+                            waiting = False
+
+                # Wait for wait_sec, poll for data
+                last_time = int(time.time()) - 1
+                wait_count = 0
+                while wait_count < wait_sec:
+                    # Sleep less because of processing delay
+                    if int(time.time()) >= last_time + 1:
+                        last_time = int(time.time())
+                        wait_count = wait_count + 1
+                        self.device.sendline(get_status_cmd + "\n")
+                        for line in self.device.readlines():
+                            self.process_cycle_data(line)
+
+                # Send next charge cmd
+                self.device.sendline(wait_cmd + "\n")
+
+                # Process readouts until mode 2 received
+                waiting = True
+                while waiting:
+                    for line in self.device.readlines():
+                        if line and self.process_cycle_data(line)[0] == "2":
+                            waiting = False
+
+                # Send discharge cmd
+                #self.device.sendline(discharge_cmd + "\n")
+
+                # Process readouts until mode 1 received
+                #waiting = True
+                #while waiting:
+                #    for line in self.device.readlines():
+                #        if line and self.process_cycle_data(line)[0] == "1":
+                #            waiting = False
+
+        except KeyboardInterrupt:
+            self.disconnect()
+            print()
+            print("Shutdown completed")
+
+
+def setup_cmd_line():
+    parser = argparse.ArgumentParser(description='Cycler2SQL - Cell Tools v0.0.1', add_help=False)
+
+    subparser = parser.add_subparsers()
+
+    # Normal Cycle
+    single = subparser.add_parser('single', help='Normal cycler system')
+    single.add_argument('-d', '--device', default=usb_dev, required=False, help='Com port of serial device')
+    single.add_argument('-t', '--testline', default=test_line, required=False, help='Com port of serial device')
+    single.set_defaults(func=Cycler().start_cycle)
+
+    # Sequence Cycle
+    sequence = subparser.add_parser('sequence', help='Runs a sequence of charges and discharges')
+    # sequence.add_argument('sequence', help='Specify the service for which logs should be fetched')
+    sequence.add_argument('-d', '--device', default=usb_dev, required=False, help='Com port of serial device')
+    sequence.add_argument('-r', '--repeat', default=1, required=False, help='Number of charge/discharge cycles to run')
+    sequence.add_argument('-w', '--wait', default=wait_sec, required=False,
+                          help='Number of seconds to sleep between charge and discharge cycle')
+    sequence.set_defaults(func=Cycler().start_sequence)
+
+    if len(sys.argv[1:]) == 0:
+        parser.print_help()
+        parser.exit()
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    args = setup_cmd_line()
+    args.func(args)
+    print("Stopping..")
