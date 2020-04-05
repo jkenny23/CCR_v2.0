@@ -2102,7 +2102,7 @@ void parseDischarge2(uint8 nArgs, char* args[])
           psu_dir_2 = strVal;
           if(psu_dir_2 == 0)
             Serial.println("Resistive");
-          else if(psu_dir_1 == 2)
+          else if(psu_dir_2 == 2)
             Serial.println("Regen");
           break;
         default:
@@ -2152,7 +2152,7 @@ void parseIR2(uint8 nArgs, char* args[])
   
   //Set default discharge current
   discharge_current_2 = DEF_DIS_CUR;
-  psu_dir_1 = DEF_PSU_MODE;
+  psu_dir_2 = DEF_PSU_MODE;
 
   Serial.print("\r\n");
   if(nArgs>1)
@@ -2414,7 +2414,7 @@ void parseCycle2(uint8 nArgs, char* args[])
   discharge_voltage_2 = DEF_DIS_VOL;
   discharge_current_2 = DEF_DIS_CUR;
   discharge_mode_2 = DEF_DIS_MODE;
-  psu_dir_1 = DEF_PSU_MODE;
+  psu_dir_2 = DEF_PSU_MODE;
   //Set default charge current/voltage/cutoff
   charge_voltage_2 = DEF_CHG_VOL;
   charge_current_2 = DEF_CHG_CUR;
@@ -2535,10 +2535,10 @@ void parseCycle2(uint8 nArgs, char* args[])
           #endif
           else if(strVal<0)
             strVal = 0;
-          psu_dir_1 = strVal;
-          if(psu_dir_1 == 0)
+          psu_dir_2 = strVal;
+          if(psu_dir_2 == 0)
             Serial.println("Resistive");
-          else if(psu_dir_1 == 2)
+          else if(psu_dir_2 == 2)
             Serial.println("Regen");
           break;
         case 'n':
@@ -2586,14 +2586,14 @@ void parseCycle2(uint8 nArgs, char* args[])
     else
       Serial.println("Stepped");
   }
-  if(psu_dir_1 == DEF_PSU_MODE)
+  if(psu_dir_2 == DEF_PSU_MODE)
   {
     Serial.print("> Using def mode: ");
-    if(psu_dir_1 == 0)
+    if(psu_dir_2 == 0)
     {
       Serial.println("Resistive");
     }
-    else if(psu_dir_1 == 2)
+    else if(psu_dir_2 == 2)
     {
       Serial.println("Regen");
     }
