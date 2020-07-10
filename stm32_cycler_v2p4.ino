@@ -43,12 +43,13 @@
 
 volatile int interruptCounter;
 
-const char vers[] = "2.0-02252020"; 
+const char vers[] = "2.0-07092020"; 
 
 #define AFTERDISWAIT 300//300 //300s after charging wait time
 #define CHGSETTLEWAIT 15//30 //30s after starting charge settle time
 #define AFTERCHGWAIT 60//60 //60s after charging wait time
 #define LOOP_PERIOD 500 //In microseconds
+#define LTCC_THRES 4 //4s of <constant current threshold before ending charge
 #define CHARGE 1
 #define DISCHARGE 2
 #define DISCONNECT 0
@@ -131,7 +132,7 @@ const char vers[] = "2.0-02252020";
   #endif
 #endif
 #ifdef HW_2_0
-  #define MAX_CHG_CUR -3500
+  #define MAX_CHG_CUR -3000
   #define MIN_CHG_VOL 1000
   #define MIN_CCC 10
   #define MAX_DIS_CUR 5000
@@ -226,7 +227,7 @@ const char vers[] = "2.0-02252020";
 #endif
 #define CELLVINC 10
 #define DEF_DIS_MODE 0
-#define DEF_PSU_MODE 1
+#define DEF_PSU_MODE 2
 #define DEF_CYCLES 1
 #define OVT_THRESH 45
 #define LED_BRIGHTNESS 80 //1-255 for LED brightness
@@ -328,10 +329,13 @@ volatile float ADC2V2 = ADC2V2INIT;
 volatile unsigned int initbuckduty1 = 160;
 volatile unsigned int initbuckduty2 = 160;
 volatile float corr_factor = 1.0f;
-#define TOFFS1 0.0f
-#define TOFFS2 0.0f
-#define TOFFSHS1 0.0f
-#define TOFFSHS2 0.0f
+#define TOFFSADDR 6
+volatile float TOFFS1 = 0.0f;
+volatile float TOFFS2 = 0.0f;
+#define TOFFSHSADDR 7
+volatile float TOFFSHS1 = 0.0f;
+volatile float TOFFSHS2 = 0.0f;
+#define DSNADDR 8
 
 Adafruit_NeoPixel leds = Adafruit_NeoPixel(2, WSDI, NEO_GRB + NEO_KHZ800);
 
@@ -367,6 +371,7 @@ int16 vr1 = 0;
 int16 vr2 = 0;
 int16 vbati1 = 0;
 int16 ibati1 = 0;
+uint8 ltcc_count1 = 0;
 int16 vbat_now1 = 0;
 int16 ibat_now1 = 0;
 float tmpfl = 0;
@@ -388,6 +393,7 @@ uint16 cycle_count_2 = 0;
 volatile uint16 settle2 = 0;
 int16 vbati2 = 0;
 int16 ibati2 = 0;
+uint8 ltcc_count2 = 0;
 int16 vbat_now2 = 0;
 int16 ibat_now2 = 0;
 float vbat2 = 0;
@@ -934,6 +940,15 @@ void setup() {
   #ifdef OLED_ENABLED
   Serial.println(" OLED Enabled");
   #endif
+  #ifdef REGEN_ENABLED
+  Serial.println(" Regen Enabled");
+  #endif
+  estatus = EEPROM.read(DSNADDR, &wData);
+  if(estatus == 0)
+  {
+      Serial.print("> Device SN: ");
+      Serial.println(wData);
+  }
   Serial.println("");
 
   estatus = EEPROM.init();
@@ -1061,6 +1076,62 @@ void setup() {
   else
   {
     Serial.println("> Input cal not found, using default.");
+  }
+  /*#define TOFFSADDR 6
+    volatile float TOFFS1 = 0.0f;
+    volatile float TOFFS2 = 0.0f;
+    #define TOFFSHSADDR 7
+    volatile float TOFFSHS1 = 0.0f;
+    volatile float TOFFSHS2 = 0.0f;*/
+  estatus = EEPROM.read(TOFFSADDR, &wData);
+  if(estatus == 0)
+  {
+    if(wData > 9999)
+    {
+      Serial.println("> Cell temp cal out of range, using default.");
+    }
+    else
+    {
+      i = wData / 100; //Get first 2 digits (slot 1 temp offset)
+      TOFFS1 = (float)i/10.0-5.0;
+      Serial.print("> Slot 1 temp cal value: ");
+      Serial.print(TOFFS1);
+      Serial.println("C");
+      wData = wData - i*100; //Get second 2 digits (slot 2 temp offset)
+      TOFFS2 = (float)wData/10.0-5.0;
+      Serial.print("> Slot 2 temp cal value: ");
+      Serial.print(TOFFS2);
+      Serial.println("C");
+    }
+  }
+  else
+  {
+    Serial.println("> Cell temp cal not found, using default.");
+  }
+  estatus = EEPROM.read(TOFFSHSADDR, &wData);
+  if(estatus == 0)
+  {
+    if(wData > 9999)
+    {
+      Serial.println("> Heatsink temp cal out of range, using default.");
+    }
+    else
+    {
+      i = wData / 100; //Get first 2 digits (slot 1 temp offset)
+      TOFFSHS1 = (float)i/10.0-5.0;
+      Serial.print("> HS temp 1 cal value: ");
+      Serial.print(TOFFSHS1);
+      Serial.println("C");
+      wData = wData - i*100; //Get second 2 digits (slot 2 temp offset)
+      TOFFSHS2 = (float)wData/10.0-5.0;
+      Serial.print("> HS temp 2 cal value: ");
+      Serial.print(TOFFSHS2);
+      Serial.println("C");
+    }
+  }
+  else
+  {
+    Serial.println("> Heatsink temp cal not found, using default.");
   }
 
   Serial.println("> Init ref...");
@@ -1320,7 +1391,7 @@ void parseDischarge1(uint8 nArgs, char* args[])
   discharge_voltage_1 = DEF_DIS_VOL;
   discharge_current_1 = DEF_DIS_CUR;
   discharge_mode_1 = DEF_DIS_MODE;
-  psu_dir_1 = DEF_DIS_MODE;
+  psu_dir_1 = DEF_PSU_MODE;
 
   Serial.print("\r\n");
   if(nArgs>1)
@@ -1429,6 +1500,7 @@ void parseIR1(uint8 nArgs, char* args[])
   
   //Set default discharge current
   discharge_current_1 = DEF_DIS_CUR;
+  psu_dir_1 = DEF_PSU_MODE;
 
   Serial.print("\r\n");
   if(nArgs>1)
@@ -1464,7 +1536,7 @@ void parseIR1(uint8 nArgs, char* args[])
           if(psu_dir_1 == 0)
             Serial.println("Resistive");
           else
-            Serial.println("Regenerative");
+            Serial.println("Regen");
           break;
         default:
           break;
@@ -1505,7 +1577,7 @@ void parsePSU1(uint8 nArgs, char* args[])
   charge_current_1 = DEF_CHG_CUR;
   discharge_voltage_1 = DEF_CHG_VOL;
   discharge_current_1 = DEF_DIS_CUR;
-  psu_dir_1 = DEF_PSU_MODE;
+  psu_dir_1 = 1;
   ccc_1 = DEF_CCC;
 
   Serial.print("\r\n");
@@ -2043,7 +2115,7 @@ void parseDischarge2(uint8 nArgs, char* args[])
   discharge_voltage_2 = DEF_DIS_VOL;
   discharge_current_2 = DEF_DIS_CUR;
   discharge_mode_2 = DEF_DIS_MODE;
-  psu_dir_2 = DEF_DIS_MODE;
+  psu_dir_2 = DEF_PSU_MODE;
 
   Serial.print("\r\n");
   if(nArgs>1)
@@ -2188,7 +2260,7 @@ void parseIR2(uint8 nArgs, char* args[])
           if(psu_dir_2 == 0)
             Serial.println("Resistive");
           else
-            Serial.println("Regenerative");
+            Serial.println("Regen");
           break;
         default:
           break;
@@ -2229,7 +2301,7 @@ void parsePSU2(uint8 nArgs, char* args[])
   charge_current_2 = DEF_CHG_CUR;
   discharge_voltage_2 = DEF_CHG_VOL;
   discharge_current_2 = DEF_DIS_CUR;
-  psu_dir_2 = DEF_PSU_MODE;
+  psu_dir_2 = 1;
   ccc_2 = DEF_CCC;
 
   Serial.print("\r\n");
@@ -3194,11 +3266,18 @@ void runStateMachine(void)
           {
             if ((ibati1 <= ccc_1) && (mode1 != 3)) //Full battery = <50mA CC
             {
-              setChg1(DISCONNECT); //Disconnect/settling state after charge, wait 10 minutes before discharging
-              state1 = 5;
-              settle1 = 0;
-              setLED1(LED_PURPLE);
+              ltcc_count1++;
+              if(ltcc_count1 >= LTCC_THRES) //NEW - check for 2nd consecutive CC threshold hit
+              {
+                setChg1(DISCONNECT); //Disconnect/settling state after charge, wait 10 minutes before discharging
+                state1 = 5;
+                settle1 = 0;
+                setLED1(LED_PURPLE);
+                ltcc_count1 = 0;
+              }
             }
+            else
+              ltcc_count1 = 0;
           }
           else
           {
@@ -3572,11 +3651,18 @@ void runStateMachine(void)
           {
             if ((ibati2 <= ccc_2) && (mode2 != 3)) //Full battery = <50mA CC
             {
-              setChg2(DISCONNECT); //Disconnect/settling state after charge, wait 10 minutes before discharging
-              state2 = 5;
-              settle2 = 0;
-              setLED2(LED_PURPLE);
+              ltcc_count2++;
+              if(ltcc_count2 >= LTCC_THRES) //NEW - check for 2nd consecutive CC threshold hit
+              {
+                setChg2(DISCONNECT); //Disconnect/settling state after charge, wait 10 minutes before discharging
+                state2 = 5;
+                settle2 = 0;
+                setLED2(LED_PURPLE);
+                ltcc_count2 = 0;
+              }
             }
+            else
+              ltcc_count2 = 0;
           }
           else
           {
@@ -4200,7 +4286,7 @@ void loop() {
           mode1 = 6;
           Serial.println("\r\n> Writing EEPROM: ");
           //aXXX = address in dec.
-          wAddress = fast_atoi_leading_pos(args[1]);
+          wAddress = fast_atoi_leading_pos(args[1]); //limit EEPROM write addresses?
           //dXXX = data in dec.
           wData = fast_atoi_leading_pos(args[2]);
           Serial.print("> Address 0x");
