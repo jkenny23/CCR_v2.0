@@ -1764,22 +1764,10 @@ void parseTM1(uint8 nArgs, char* args[])
     if(discharge_mode_1 == 0)
     {
       Serial.println("Boost");
-      if(discharge_voltage_1 == DEF_DIS_VOL)
-      {
-        Serial.print("> Using def voltage: ");
-        Serial.print(discharge_voltage_1);
-        Serial.println("mV");
-      }
     }
     else
     {
       Serial.println("Buck");
-      if(charge_voltage_1 == DEF_CHG_VOL)
-      {
-        Serial.print("> Using def voltage: ");
-        Serial.print(charge_voltage_1);
-        Serial.println("mV");
-      }
     }
   }
 }
@@ -2452,7 +2440,7 @@ void parsePSU2(uint8 nArgs, char* args[])
     Serial.print(discharge_current_2);
     Serial.println("mA");
   }
-  if(psu_dir_1 == DEF_PSU_MODE)
+  if(psu_dir_2 == DEF_PSU_MODE)
   {
     Serial.print("> Using def mode: ");
     Serial.println("Buck");
@@ -2528,28 +2516,16 @@ void parseTM2(uint8 nArgs, char* args[])
     }
   }
   
-  if(psu_dir_1 == DEF_PSU_MODE)
+  if(psu_dir_2 == DEF_PSU_MODE)
   {
     Serial.print("> Using def mode: ");
-    if(discharge_mode_1 == 0)
+    if(discharge_mode_2 == 0)
     {
       Serial.println("Boost");
-      if(discharge_voltage_1 == DEF_DIS_VOL)
-      {
-        Serial.print("> Using def voltage: ");
-        Serial.print(discharge_voltage_1);
-        Serial.println("mV");
-      }
     }
     else
     {
       Serial.println("Buck");
-      if(charge_voltage_1 == DEF_CHG_VOL)
-      {
-        Serial.print("> Using def voltage: ");
-        Serial.print(charge_voltage_1);
-        Serial.println("mV");
-      }
     }
   }
 }
