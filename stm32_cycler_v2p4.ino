@@ -228,6 +228,7 @@ const char vers[] = "2.0-07092020";
 #define CELLVINC 10
 #define DEF_DIS_MODE 0
 #define DEF_PSU_MODE 2
+#define DEF_DCCC 400
 #define DEF_CYCLES 1
 #define OVT_THRESH 45
 #define LED_BRIGHTNESS 80 //1-255 for LED brightness
@@ -244,6 +245,7 @@ volatile uint16 discharge_voltage_1 = 2700;
 volatile int16 charge_power_1 = 0;
 //volatile uint16 discharge_power_1 = 1500;
 volatile uint16 ccc_1 = 50; //Charge CC cutoff in mA (50mA)
+volatile uint16 dccc_1 = 400; //Discharge CC cutoff in mA (50mA)
 volatile uint16 num_cycles_1 = 1;
 volatile uint8 discharge_mode_1 = 0;
 volatile uint8 psu_dir_1 = 0;
@@ -255,6 +257,7 @@ volatile uint16 discharge_current_2 = 1500;
 volatile uint16 discharge_voltage_2 = 2700;
 volatile int16 charge_power_2 = 0;
 volatile uint16 ccc_2 = 50; //Charge CC cutoff in mA (50mA)
+volatile uint16 dccc_2 = 400; //Discharge CC cutoff in mA (50mA)
 volatile uint16 num_cycles_2 = 1;
 volatile uint8 discharge_mode_2 = 0;
 volatile uint8 psu_dir_2 = 0;
@@ -267,6 +270,8 @@ volatile uint8 cell1_type = 0; //0 = Li-Ion, 1 = NiMH
 volatile uint8 cell2_type = 0;
 volatile uint8 displayEnabled = 0;
 volatile uint8 fanSpeed = 0; //0 = off, 1 = pwm, 2 = on
+volatile uint8 discharge_offset_1 = 100; //decrease CV trigger in discharge modes by 100mV when not in taper mode
+volatile uint8 discharge_offset_2 = 100;
 
 //Initialize reference voltage with default until read out of EEPROM
 #define REFAVALINIT 2048000.0f
@@ -419,9 +424,9 @@ volatile uint32 last_tick_fan = 0;
 
 boolean fantoggle = false;
 
-//y 1500 2700 0 1500 4200 1000 1\r\n
-//32 chars with /r/n + 8 corrections (e.g. 4 backspace + 4 chars)
-#define MAXCHARS 40
+//y1 i1234 v2345 m1 k3456 u4123 o1567 l10000 r2 n1 e65535 q2345
+//64 chars with /r/n + 8 corrections (e.g. 4 backspace + 4 chars)
+#define MAXCHARS 72
 char receivedChars[MAXCHARS];
 boolean newData = false;
 
@@ -491,11 +496,11 @@ unsigned short getDisPwr(){
   
   if ((state1 == 1) || (state1 == 6) || (state1 == 7)) //Discharging states
   {
-    power = discharge_current_1*charge_voltage_1/1000;
+    power = discharge_current_1*vbat_1_1/1000;
   }
   if ((state2 == 1) || (state2 == 6) || (state2 == 7)) //Discharging states
   {
-    power += discharge_current_2*charge_voltage_2/1000;
+    power += discharge_current_2*vbat_1_2/1000;
   }
 
   return (unsigned short)power; //Returns power in mW
@@ -1392,6 +1397,7 @@ void parseDischarge1(uint8 nArgs, char* args[])
   discharge_current_1 = DEF_DIS_CUR;
   discharge_mode_1 = DEF_DIS_MODE;
   psu_dir_1 = DEF_PSU_MODE;
+  dccc_1 = DEF_DCCC;
 
   Serial.print("\r\n");
   if(nArgs>1)
@@ -1431,9 +1437,15 @@ void parseDischarge1(uint8 nArgs, char* args[])
             strVal = 0;
           discharge_mode_1 = strVal;
           if(discharge_mode_1 == 0)
+          {
+            discharge_offset_1 = 100;
             Serial.println("Constant");
+          }
           else
-            Serial.println("Stepped");
+          {
+            discharge_offset_1 = 0;
+            Serial.println("Taper");
+          }
           break;
         case 'r':
           Serial.print("> Using mode: ");
@@ -1452,6 +1464,17 @@ void parseDischarge1(uint8 nArgs, char* args[])
             Serial.println("Resistive");
           else if(psu_dir_1 == 2)
             Serial.println("Regen");
+          break;
+        case 'o':
+          Serial.print("> Using cutoff: ");
+          strVal = fast_atoi_leading_pos(args[i]);
+          if(strVal<MIN_CCC)
+            strVal = MIN_CCC;
+          else if(strVal>6000)
+            strVal = 6000;
+          dccc_1 = strVal;
+          Serial.print(dccc_1);
+          Serial.println("mA");
           break;
         default:
           break;
@@ -1477,7 +1500,13 @@ void parseDischarge1(uint8 nArgs, char* args[])
     if(discharge_mode_1 == 0)
       Serial.println("Constant");
     else
-      Serial.println("Stepped");
+      Serial.println("Taper");
+  }
+  if(dccc_1 == DEF_DCCC)
+  {
+    Serial.print("> Using def cutoff: ");
+    Serial.print(dccc_1);
+    Serial.println("mA");
   }
   if(psu_dir_1 == DEF_PSU_MODE)
   {
@@ -1769,6 +1798,7 @@ void parseCycle1(uint8 nArgs, char* args[])
   charge_voltage_1 = DEF_CHG_VOL;
   charge_current_1 = DEF_CHG_CUR;
   ccc_1 = DEF_CCC;
+  dccc_1 = DEF_DCCC;
   num_cycles_1 = DEF_CYCLES;
   cell1_type = DEF_CELL_TYPE;
   charge_power_1 = 0;
@@ -1837,9 +1867,15 @@ void parseCycle1(uint8 nArgs, char* args[])
             strVal = 0;
           discharge_mode_1 = strVal;
           if(discharge_mode_1 == 0)
+          {
+            discharge_offset_1 = 100;
             Serial.println("Constant");
+          }
           else
-            Serial.println("Stepped");
+          {
+            discharge_offset_1 = 0;
+            Serial.println("Taper");
+          }
           break;
         case 'k':
           Serial.print("> Using current: ");
@@ -1864,7 +1900,7 @@ void parseCycle1(uint8 nArgs, char* args[])
           Serial.println("mV");
           break;
         case 'o':
-          Serial.print("> Using cutoff: ");
+          Serial.print("> Using chg cutoff: ");
           strVal = fast_atoi_leading_pos(args[i]);
           if(strVal<MIN_CCC)
             strVal = MIN_CCC;
@@ -1872,6 +1908,17 @@ void parseCycle1(uint8 nArgs, char* args[])
             strVal = 2000;
           ccc_1 = strVal;
           Serial.print(ccc_1);
+          Serial.println("mA");
+          break;
+        case 'q':
+          Serial.print("> Using dis cutoff: ");
+          strVal = fast_atoi_leading_pos(args[i]);
+          if(strVal<MIN_CCC)
+            strVal = MIN_CCC;
+          else if(strVal>6000)
+            strVal = 6000;
+          dccc_1 = strVal;
+          Serial.print(dccc_1);
           Serial.println("mA");
           break;
         case 'l':
@@ -1945,7 +1992,7 @@ void parseCycle1(uint8 nArgs, char* args[])
     if(discharge_mode_1 == 0)
       Serial.println("Constant");
     else
-      Serial.println("Stepped");
+      Serial.println("Taper");
   }
   if(psu_dir_1 == DEF_PSU_MODE)
   {
@@ -1973,8 +2020,14 @@ void parseCycle1(uint8 nArgs, char* args[])
   }
   if(ccc_1 == DEF_CCC)
   {
-    Serial.print("> Using def cutoff: ");
+    Serial.print("> Using def chg cutoff: ");
     Serial.print(ccc_1);
+    Serial.println("mA");
+  }
+  if(dccc_1 == DEF_DCCC)
+  {
+    Serial.print("> Using def dis cutoff: ");
+    Serial.print(dccc_1);
     Serial.println("mA");
   }
   if(num_cycles_1 == DEF_CYCLES)
@@ -2116,6 +2169,7 @@ void parseDischarge2(uint8 nArgs, char* args[])
   discharge_current_2 = DEF_DIS_CUR;
   discharge_mode_2 = DEF_DIS_MODE;
   psu_dir_2 = DEF_PSU_MODE;
+  dccc_2 = DEF_DCCC;
 
   Serial.print("\r\n");
   if(nArgs>1)
@@ -2155,9 +2209,15 @@ void parseDischarge2(uint8 nArgs, char* args[])
             strVal = 0;
           discharge_mode_2 = strVal;
           if(discharge_mode_2 == 0)
+          {
+            discharge_offset_2 = 100;
             Serial.println("Constant");
+          }
           else
-            Serial.println("Stepped");
+          {
+            discharge_offset_2 = 0;
+            Serial.println("Taper");
+          }
           break;
         case 'r':
           Serial.print("> Using mode: ");
@@ -2176,6 +2236,17 @@ void parseDischarge2(uint8 nArgs, char* args[])
             Serial.println("Resistive");
           else if(psu_dir_2 == 2)
             Serial.println("Regen");
+          break;
+        case 'o':
+          Serial.print("> Using cutoff: ");
+          strVal = fast_atoi_leading_pos(args[i]);
+          if(strVal<MIN_CCC)
+            strVal = MIN_CCC;
+          else if(strVal>6000)
+            strVal = 6000;
+          dccc_2 = strVal;
+          Serial.print(dccc_2);
+          Serial.println("mA");
           break;
         default:
           break;
@@ -2201,7 +2272,13 @@ void parseDischarge2(uint8 nArgs, char* args[])
     if(discharge_mode_2 == 0)
       Serial.println("Constant");
     else
-      Serial.println("Stepped");
+      Serial.println("Taper");
+  }
+  if(dccc_2 == DEF_DCCC)
+  {
+    Serial.print("> Using def cutoff: ");
+    Serial.print(dccc_2);
+    Serial.println("mA");
   }
   if(psu_dir_2 == DEF_PSU_MODE)
   {
@@ -2210,7 +2287,7 @@ void parseDischarge2(uint8 nArgs, char* args[])
     {
       Serial.println("Resistive");
     }
-    else if(psu_dir_1 == 2)
+    else if(psu_dir_2 == 2)
     {
       Serial.println("Regen");
     }
@@ -2491,6 +2568,7 @@ void parseCycle2(uint8 nArgs, char* args[])
   charge_voltage_2 = DEF_CHG_VOL;
   charge_current_2 = DEF_CHG_CUR;
   ccc_2 = DEF_CCC;
+  dccc_2 = DEF_DCCC;
   num_cycles_2 = DEF_CYCLES;
   cell2_type = DEF_CELL_TYPE;
   charge_power_2 = DEF_TIMEOUT;
@@ -2548,9 +2626,15 @@ void parseCycle2(uint8 nArgs, char* args[])
             strVal = 0;
           discharge_mode_2 = strVal;
           if(discharge_mode_2 == 0)
+          {
+            discharge_offset_2 = 100;
             Serial.println("Constant");
+          }
           else
-            Serial.println("Stepped");
+          {
+            discharge_offset_2 = 0;
+            Serial.println("Taper");
+          }
           break;
         case 'k':
           Serial.print("> Using current: ");
@@ -2575,7 +2659,7 @@ void parseCycle2(uint8 nArgs, char* args[])
           Serial.println("mV");
           break;
         case 'o':
-          Serial.print("> Using cutoff: ");
+          Serial.print("> Using chg cutoff: ");
           strVal = fast_atoi_leading_pos(args[i]);
           if(strVal<MIN_CCC)
             strVal = MIN_CCC;
@@ -2583,6 +2667,17 @@ void parseCycle2(uint8 nArgs, char* args[])
             strVal = 2000;
           ccc_2 = strVal;
           Serial.print(ccc_2);
+          Serial.println("mA");
+          break;
+        case 'q':
+          Serial.print("> Using dis cutoff: ");
+          strVal = fast_atoi_leading_pos(args[i]);
+          if(strVal<MIN_CCC)
+            strVal = MIN_CCC;
+          else if(strVal>6000)
+            strVal = 6000;
+          dccc_2 = strVal;
+          Serial.print(dccc_2);
           Serial.println("mA");
           break;
         case 'l':
@@ -2656,7 +2751,7 @@ void parseCycle2(uint8 nArgs, char* args[])
     if(discharge_mode_2 == 0)
       Serial.println("Constant");
     else
-      Serial.println("Stepped");
+      Serial.println("Taper");
   }
   if(psu_dir_2 == DEF_PSU_MODE)
   {
@@ -2684,8 +2779,14 @@ void parseCycle2(uint8 nArgs, char* args[])
   }
   if(ccc_2 == DEF_CCC)
   {
-    Serial.print("> Using def cutoff: ");
+    Serial.print("> Using def chg cutoff: ");
     Serial.print(ccc_2);
+    Serial.println("mA");
+  }
+  if(dccc_2 == DEF_DCCC)
+  {
+    Serial.print("> Using def dis cutoff: ");
+    Serial.print(dccc_2);
     Serial.println("mA");
   }
   if(num_cycles_2 == DEF_CYCLES)
@@ -2784,7 +2885,7 @@ void runStateMachine(void)
       {
         if (ibat_now1 < discharge_current_1) //Ibat < 1.5A
         {
-          if (vbat_now1 > (discharge_voltage_1 - 100)) //Vbat > 2.7V, Ibat < 1.5A
+          if (vbat_now1 > (discharge_voltage_1 - discharge_offset_1)) //Vbat > 2.7V, Ibat < 1.5A
           {
             duty1++;
             if (duty1 > MAXBUCKDUTY)
@@ -2809,7 +2910,7 @@ void runStateMachine(void)
       {
         if (ibat_now1 < discharge_current_1) //Ibat < 1.5A
         {
-          if (vbat_now1 > (discharge_voltage_1 - 100)) //Vbat > 2.7V, Ibat < 1.5A
+          if (vbat_now1 > (discharge_voltage_1 - discharge_offset_1)) //Vbat > 2.7V, Ibat < 1.5A
           { 
             duty1--;
             if (duty1 < MINBUCKDUTY)
@@ -2923,7 +3024,7 @@ void runStateMachine(void)
       {
         if (ibat_now2 < discharge_current_2) //Ibat < 1.5A
         {
-          if (vbat_now2 > (discharge_voltage_2 - 100)) //Vbat > 2.7V, Ibat < 1.5A
+          if (vbat_now2 > (discharge_voltage_2 - discharge_offset_2)) //Vbat > 2.7V, Ibat < 1.5A
           {
             duty2++;
             if (duty2 > MAXBUCKDUTY)
@@ -2948,7 +3049,7 @@ void runStateMachine(void)
       {
         if (ibat_now2 < discharge_current_2) //Ibat < 1.5A
         {
-          if (vbat_now2 > (discharge_voltage_2 - 100)) //Vbat > 2.7V, Ibat < 1.5A
+          if (vbat_now2 > (discharge_voltage_2 - discharge_offset_2)) //Vbat > 2.7V, Ibat < 1.5A
           { 
             duty2--;
             if (duty2 < MINBUCKDUTY)
@@ -3188,7 +3289,7 @@ void runStateMachine(void)
         case 1: //Discharge state; check for LVC, goto disconnect state if triggered
           //Serial.println("Case 1");
           vbati1 = (int)(vbat_1_1);
-          if ((vbati1 <= discharge_voltage_1) && (mode1 != 3)) //Discharged at 2.75V
+          if ((vbati1 <= discharge_voltage_1) && (mode1 != 3) && (discharge_mode_1 == 0)) //Discharged at 2.75V
           {
             state1 = 2;
             settle1 = 0;
@@ -3196,10 +3297,28 @@ void runStateMachine(void)
           }
           else if ((ibat_1_1 <= ccc_1) && (mode1 == 3) && (settle1 > 10)) //Full battery = <50mA CC
           {
-            state1 = 2;
-            settle1 = 0;
-            setLED1(LED_PURPLE);
+            ltcc_count1++;
+            if(ltcc_count1 >= LTCC_THRES) //NEW - check for 2nd consecutive CC threshold hit
+            {
+              state1 = 2;
+              settle1 = 0;
+              setLED1(LED_PURPLE);
+              ltcc_count1 = 0;
+            }
           }
+          else if ((ibat_1_1 <= dccc_1) && (discharge_mode_1 == 1) && (settle1 > 10))
+          {
+            ltcc_count1++;
+            if(ltcc_count1 >= LTCC_THRES) //NEW - check for 2nd consecutive CC threshold hit
+            {
+              state1 = 2;
+              settle1 = 0;
+              setLED1(LED_PURPLE);
+              ltcc_count1 = 0;
+            }
+          }
+          else
+            ltcc_count1 = 0;
           break;
         case 2: //Disconnect/settling state after discharge, wait 5 minutes before charging
           //Serial.println("Case 2");
@@ -3574,7 +3693,7 @@ void runStateMachine(void)
         case 1: //Discharge state; check for LVC, goto disconnect state if triggered
           //Serial.println("Case 1");
           vbati2 = (int)(vbat_1_2);
-          if ((vbati2 <= discharge_voltage_2) && (mode2 != 3)) //Discharged at 2.75V
+          if ((vbati2 <= discharge_voltage_2) && (mode2 != 3) && (discharge_mode_2 == 0)) //Discharged at 2.75V
           {
             state2 = 2;
             settle2 = 0;
@@ -3582,10 +3701,28 @@ void runStateMachine(void)
           }
           else if ((ibat_1_2 <= ccc_2) && (mode2 == 3) && (settle2 > 10)) //Full battery = <50mA CC
           {
-            state2 = 2;
-            settle2 = 0;
-            setLED2(LED_PURPLE);
+            ltcc_count2++;
+            if(ltcc_count2 >= LTCC_THRES) //NEW - check for 2nd consecutive CC threshold hit
+            {
+              state2 = 2;
+              settle2 = 0;
+              setLED2(LED_PURPLE);
+              ltcc_count2 = 0;
+            }
           }
+          else if ((ibat_1_2 <= dccc_2) && (discharge_mode_2 == 1) && (settle2 > 10))
+          {
+            ltcc_count2++;
+            if(ltcc_count2 >= LTCC_THRES) //NEW - check for 2nd consecutive CC threshold hit
+            {
+              state2 = 2;
+              settle2 = 0;
+              setLED2(LED_PURPLE);
+              ltcc_count2 = 0;
+            }
+          }
+          else
+            ltcc_count2 = 0;
           break;
         case 2: //Disconnect/settling state after discharge, wait 5 minutes before charging
           //Serial.println("Case 2");
