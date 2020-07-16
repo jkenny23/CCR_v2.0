@@ -26,8 +26,8 @@
 #define REGEN_ENABLED
 //#define MON_SHUNT
 //#define V_1S //220k/150k 0-4.84V
-#define V_2S //430k/150k 0-9.46V, 2s charging allowed
-//#define V_2S1 //430k/150k 0-9.46V, only 1s charging allowed
+//#define V_2S //430k/150k 0-9.46V, 2s charging allowed
+#define V_2S1 //430k/150k 0-9.46V, only 1s charging allowed
 //#define LP //Low power, 4A limit, 1.65A shunt, 90kHz Fsw
 
 #ifdef OLED_ENABLED
@@ -43,7 +43,7 @@
 
 volatile int interruptCounter;
 
-const char vers[] = "2.0-07092020"; 
+const char vers[] = "2.0-07152020"; 
 
 #define AFTERDISWAIT 300//300 //300s after charging wait time
 #define CHGSETTLEWAIT 15//30 //30s after starting charge settle time
