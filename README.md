@@ -1,41 +1,26 @@
 # CCR_v2.0
 
-This is the main code repository for the CCR v2.0 18650 charger/tester. More details on the project and hardware can be found here: http://rev0.net/index.php?title=CCR
+This is the main unified code repository for the CCR 18650 charger/tester. More details on the project and hardware can be found here: http://rev0.net/index.php?title=CCR
 
-This code is intended for the version 2.0 hardware, with the following hardware defines:
+This code is tested for the version 2.4 hardware, but backwards compatible with older hardware, selectable with the following defines:
 ```c
-//Pin definitions - Analog inputs
-#define AC1V PB0 //Cell 1 voltage input
-#define AC1A PB1 //Cell 1 current input
-#define AC1T PA3 //Cell 1 temperature input
-#define AC1R PA1 //Cell 1 reverse voltage input
-#define AC2V PA6 //Cell 2 voltage input
-#define AC2A PA7 //Cell 2 current input
-#define AC2T PA2 //Cell 2 temperature input
-#define AC2R PA0 //Cell 2 reverse voltage input
-#define ABUFV PA4 //Buffer/input voltage input
-#define AUXSEL2 PB5 //Lo = HS thermistor #2, Hi = HS thermistor #1 or ABUFV
-#define AUXSEL1 PB2 //Lo = ABUFV, Hi = HS thermistor #1
-#define HSTH1 0
-#define HSTH2 1
-#define BUFV 2
-#define AIREF PA5 //Reference voltage input
-//Pin definitions - Digital outputs
-#define OC1NF1 PA8 //Boost NFET output
-#define OC1PF PA9 //Buck PFET output
-#define OC2NF1 PA10 //Boost NFET output
-#define OC2PF PB8 //Buck PFET output
-#define OC1NF2 PB6 //CC 1 setting output
-#define OC2NF2 PB7 //CC 2 setting output
-#define C1DOFF PB15 //CC 1 disable output
-#define C2DOFF PA15 //CC 2 disable output
-#define C1ON PB14 //Cell 1 protection bypass
-#define C2ON PB3 //Cell 2 protection bypass
-#define FANON PB4 //Fan control output
-#define WSDI PB13 //LED control pin, inverted logic
-//Pin definitions - Digital inputs
-#define S1 PB9 //Switch 1
-#define S2 PC13 //Switch 2
+// Hardware Configurations:
+// HW 2.0 - First CCR v2 HW using individual N- and P- gate drivers, max current 3A from 12V, 3.5A from 5V
+// HW 2.4 - Second CCR v2 HW using synchronous gate drivers, max current +/-6A from 7.5-12V
+// 1S - Using 220k/150k divider for 0-4.84V measurement
+// 2S - Using 430k/150k divider for 0-9.46V measurement
+// OLED - Using OLED display or not (not currently compatible with LEDs)
+//#define OLED_ENABLED
+//#define HW_1_0
+//#define HW_2_0
+#define HW_2_4
+//#define DEBUG_MODE
+#define REGEN_ENABLED
+//#define MON_SHUNT
+//#define V_1S //220k/150k 0-4.84V
+//#define V_2S //430k/150k 0-9.46V, 2s charging allowed
+#define V_2S1 //430k/150k 0-9.46V, only 1s charging allowed
+//#define LP //Low power, 4A limit, 1.65A shunt, 90kHz Fsw
 ```
 
 Library dependencies:
