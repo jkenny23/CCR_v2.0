@@ -29,6 +29,8 @@
 //#define V_2S //430k/150k 0-9.46V, 2s charging allowed
 #define V_2S1 //430k/150k 0-9.46V, only 1s charging allowed
 //#define LP //Low power, 4A limit, 1.65A shunt, 90kHz Fsw
+//#define MSG20 //2.0- message format
+#define MSG24 //2.1+ message format
 
 #ifdef OLED_ENABLED
   #include <Adafruit_GFX_AS.h>
@@ -43,7 +45,7 @@
 
 volatile int interruptCounter;
 
-const char vers[] = "2.0-07162020"; 
+const char vers[] = "2.0-07172020"; 
 
 #define AFTERDISWAIT 300//300 //300s after charging wait time
 #define CHGSETTLEWAIT 15//30 //30s after starting charge settle time
@@ -121,6 +123,7 @@ const char vers[] = "2.0-07162020";
   #define ABUFV PA0
   #define AC1T PA4
   #define AC2T PA3
+  #define DEF_PSU_MODE 2
   #ifdef V_1S
     #define OVV_THRESH 4370
   #endif
@@ -145,6 +148,7 @@ const char vers[] = "2.0-07162020";
   #define DEF_CCC 50
   #define DEF_DIS_CUR 1500
   #define DEF_DIS_VOL 2700
+  #define DEF_PSU_MODE 0
   //CCR v2.0 HW configuration:
   #define AUXSEL2 PB5 //Lo = HS thermistor #2, Hi = HS thermistor #1 or ABUFV
   #define AUXSEL1 PB2 //Lo = ABUFV, Hi = HS thermistor #1
@@ -182,12 +186,14 @@ const char vers[] = "2.0-07162020";
     #else
       #define MAX_DIS_CUR 6500
     #endif
+    #define DEF_PSU_MODE 2
   #else
     #ifdef LP
       #define MAX_DIS_CUR 1500
     #else
       #define MAX_DIS_CUR 5000
     #endif
+    #define DEF_PSU_MODE 1
   #endif
   #define MIN_DIS_VOL 700
   #define MINBUCKDUTY 1
@@ -227,7 +233,6 @@ const char vers[] = "2.0-07162020";
 #endif
 #define CELLVINC 10
 #define DEF_DIS_MODE 0
-#define DEF_PSU_MODE 2
 #define DEF_DCCC 400
 #define DEF_CYCLES 1
 #define OVT_THRESH 45
@@ -248,7 +253,7 @@ volatile uint16 ccc_1 = 50; //Charge CC cutoff in mA (50mA)
 volatile uint16 dccc_1 = 400; //Discharge CC cutoff in mA (50mA)
 volatile uint16 num_cycles_1 = 1;
 volatile uint8 discharge_mode_1 = 0;
-volatile uint8 psu_dir_1 = 0;
+volatile uint8 psu_dir_1 = DEF_PSU_MODE;
 volatile uint16 tm_duty_1 = 0;
 volatile int16 charge_current_2 = -1500;
 volatile uint16 charge_voltage_2 = 4200;
@@ -260,7 +265,7 @@ volatile uint16 ccc_2 = 50; //Charge CC cutoff in mA (50mA)
 volatile uint16 dccc_2 = 400; //Discharge CC cutoff in mA (50mA)
 volatile uint16 num_cycles_2 = 1;
 volatile uint8 discharge_mode_2 = 0;
-volatile uint8 psu_dir_2 = 0;
+volatile uint8 psu_dir_2 = DEF_PSU_MODE;
 volatile uint16 tm_duty_2 = 0;
 volatile uint8 slot1_startup = 0;
 volatile uint8 slot2_startup = 0;
@@ -3129,22 +3134,36 @@ void runStateMachine(void)
       //     mV/2 + mV/8*4    -  mV/8*4*2    /  mA/8  / 125
       //         mV           -  mV          /  A = mOhms
       ir1 = ((voc11 + voc21 * 4.0) - (vload1 * 8.0)) / (iload1 / 125.0);
-      //Msg type 3 (IR): 3,4126.45,mV,4123.15,mOhms,1259.21,mA,4053.12,mV,56.92,mOhms, 7,1
-      //(IR Complete,3,Voc1,mV,Voc2,mV,Iload,mA,Vload,mV,IR,mOhms,State,Time)
-      Serial.print("3,");
-      Serial.print(voc11 * 2.0);
-      Serial.print(",");
-      Serial.print(voc21 * 8.0);
-      Serial.print(",");
-      Serial.print(iload1 * 8.0);
-      Serial.print(",");
-      Serial.print(vload1 * 8.0);
-      Serial.print(",");
-      Serial.print(ir1);
-      Serial.print(",");
-      Serial.println(state1);
-      //Serial.print(",");
-      //Serial.println(settle1);
+      #ifdef MSG20
+        //Msg type 3 (IR): 3,4126.45,mV,4123.15,mOhms,1259.21,mA,4053.12,mV,56.92,mOhms, 7,1
+        //(IR Complete,3,Voc1,mV,Voc2,mV,Iload,mA,Vload,mV,IR,mOhms,State,Time)
+        Serial.print("3,");
+        Serial.print(voc11 * 2.0);
+        Serial.print(",");
+        Serial.print(voc21 * 8.0);
+        Serial.print(",");
+        Serial.print(iload1 * 8.0);
+        Serial.print(",");
+        Serial.print(vload1 * 8.0);
+        Serial.print(",");
+        Serial.print(ir1);
+        Serial.print(",");
+        Serial.println(state1);
+        //Serial.print(",");
+        //Serial.println(settle1);
+      #endif
+      #ifdef MSG24
+        Serial.print("^,2,"); //Cell 1, IR debug
+        Serial.print(voc11 * 2.0);
+        Serial.print(",");
+        Serial.print(voc21 * 8.0);
+        Serial.print(",");
+        Serial.print(iload1 * 8.0);
+        Serial.print(",");
+        Serial.print(vload1 * 8.0);
+        Serial.print(",");
+        Serial.println(ir1);
+      #endif
       irstate1 = 0;
       discharge_offset_1 = discharge_offset_tmp1;
     }
@@ -3211,24 +3230,62 @@ void runStateMachine(void)
       //78.125us/char at 115200
       if (state1 != 8)
       {
-        //Msg type 0 (Periodic Status): 0,3754.12,mV,-1453.98,mA,-750.19,mAH,-2810.34,mWH,23.5,C,4,358
-        //(Periodic Status,0,Vbat,mV,Ibat,mA,Capacity,mAH,Capacity,mWH,Temp,C,State,Time)
-        Serial.print("0,");
-        Serial.print(vbat_1_1);
-        Serial.print(",");
-        Serial.print(ibat_1_1);
-        Serial.print(",");
-        Serial.print(mah1);
-        Serial.print(",");
-        //vbuf_i = (int)(((float)getAuxADC(BUFV)) * BUF2V);
-        //Serial.print(vbuf_i); //2.417);
-        Serial.print(mwh1);
-        Serial.print(",");
-        Serial.print(temp1);
-        Serial.print(",");
-        Serial.println(state1);
-        //Serial.print(",");
-        //Serial.println(settle1);
+        #ifdef MSG20
+          //Msg type 0 (Periodic Status): 0,3754.12,mV,-1453.98,mA,-750.19,mAH,-2810.34,mWH,23.5,C,4,358
+          //(Periodic Status,0,Vbat,mV,Ibat,mA,Capacity,mAH,Capacity,mWH,Temp,C,State,Time)
+          Serial.print("0,");
+          Serial.print(vbat_1_1);
+          Serial.print(",");
+          Serial.print(ibat_1_1);
+          Serial.print(",");
+          Serial.print(mah1);
+          Serial.print(",");
+          //vbuf_i = (int)(((float)getAuxADC(BUFV)) * BUF2V);
+          //Serial.print(vbuf_i); //2.417);
+          Serial.print(mwh1);
+          Serial.print(",");
+          Serial.print(temp1);
+          Serial.print(",");
+          Serial.println(state1);
+          //Serial.print(",");
+          //Serial.println(settle1);
+        #endif
+        #ifdef MSG24
+          //Msg type 0 (Periodic Status): 0,3754.12,mV,-1453.98,mA,-750.19,mAH,-2810.34,mWH,23.5,C,4,358
+          //(Periodic Status,0,Vbat,mV,Ibat,mA,Capacity,mAH,Capacity,mWH,Temp,C,State,Time)
+          Serial.print("1,"); //Cell 1, periodic status
+          if(state1 == 1) //Discharging states
+          {
+            Serial.print("1,");
+          }
+          else if((state1 == 6) || (state1 == 7)) //IR states
+          {
+            Serial.print("5,");
+          }
+          else if((state1 == 3) || (state1 == 4)) //Charging states
+          {
+            Serial.print("2,");
+          }
+          else
+          {
+            Serial.print("6,");
+          }
+          Serial.print(vbat_1_1);
+          Serial.print(",");
+          Serial.print(ibat_1_1);
+          Serial.print(",");
+          Serial.print(mah1);
+          Serial.print(",");
+          //vbuf_i = (int)(((float)getAuxADC(BUFV)) * BUF2V);
+          //Serial.print(vbuf_i); //2.417);
+          Serial.print(mwh1);
+          Serial.print(",");
+          Serial.print(temp1);
+          Serial.print(",");
+          Serial.println(ir1);
+          //Serial.print(",");
+          //Serial.println(settle1);
+        #endif
       }
       /* State machine:
           0. Battery Disconnected (Unused)
@@ -3320,24 +3377,46 @@ void runStateMachine(void)
               setChg1(CHARGE);
               setLED1(LED_CYAN);
             }
-            //Msg type 1 (Discharged): 0,2754.12,mV,32.57,mOhms,893.21,mAH,3295.12,mWH,25.1,C,3,1
-            //(Periodic Status,0,Vbat,mV,IR,mOhms,Capacity,mAH,Capacity,mWH,Temp,C,State,Time)
-            Serial.print("1,");
-            Serial.print(vbat_1_1);
-            Serial.print(",");
-            Serial.print(ir1);
-            Serial.print(",");
-            Serial.print(mah1);
-            Serial.print(",");
-            Serial.print(mwh1);
-            Serial.print(",");
-            Serial.print(temp1);
-            Serial.print(",");
-            Serial.println(state1);
-            //Serial.print(",");
-            //Serial.println(settle1);
-            mah1 = 0;
-            mwh1 = 0;
+              #ifdef MSG20
+                //Msg type 1 (Discharged): 0,2754.12,mV,32.57,mOhms,893.21,mAH,3295.12,mWH,25.1,C,3,1
+                //(Periodic Status,0,Vbat,mV,IR,mOhms,Capacity,mAH,Capacity,mWH,Temp,C,State,Time)
+                Serial.print("1,");
+                Serial.print(vbat_1_1);
+                Serial.print(",");
+                Serial.print(ir1);
+                Serial.print(",");
+                Serial.print(mah1);
+                Serial.print(",");
+                Serial.print(mwh1);
+                Serial.print(",");
+                Serial.print(temp1);
+                Serial.print(",");
+                Serial.println(state1);
+                //Serial.print(",");
+                //Serial.println(settle1);
+                mah1 = 0;
+                mwh1 = 0;
+              #endif
+              #ifdef MSG24
+                //Msg type 0 (Periodic Status): 0,3754.12,mV,-1453.98,mA,-750.19,mAH,-2810.34,mWH,23.5,C,4,358
+                //(Periodic Status,0,Vbat,mV,Ibat,mA,Capacity,mAH,Capacity,mWH,Temp,C,State,Time)
+                Serial.print("1,3,"); //Cell 1, end of discharge
+                Serial.print(vbat_1_1);
+                Serial.print(",");
+                Serial.print(ibat_1_1);
+                Serial.print(",");
+                Serial.print(mah1);
+                Serial.print(",");
+                //vbuf_i = (int)(((float)getAuxADC(BUFV)) * BUF2V);
+                //Serial.print(vbuf_i); //2.417);
+                Serial.print(mwh1);
+                Serial.print(",");
+                Serial.print(temp1);
+                Serial.print(",");
+                Serial.println(ir1);
+                //Serial.print(",");
+                //Serial.println(settle1);
+              #endif
           }
           break;
         case 3: //Charging state (CC)
@@ -3454,22 +3533,39 @@ void runStateMachine(void)
                 #endif
               }
             }
-            //Msg type 2 (Charged): 0,4126.45,mV,32.57,mOhms,-750.19,mAH,-2810.34,mWH,23.5,C,6,1
-            //(Charged,0,Vbat,mV,IR,mOhms,Capacity,mAH,Capacity,mWH,Temp,C,State,Time)
-            Serial.print("2,");
-            Serial.print(vbat_1_1);
-            Serial.print(",");
-            Serial.print(ir1);
-            Serial.print(",");
-            Serial.print(mah1);
-            Serial.print(",");
-            Serial.print(mwh1);
-            Serial.print(",");
-            Serial.print(temp1);
-            Serial.print(",");
-            Serial.println(state1);
-            //Serial.print(",");
-            //Serial.println(settle1);
+            #ifdef MSG20
+              //Msg type 2 (Charged): 0,4126.45,mV,32.57,mOhms,-750.19,mAH,-2810.34,mWH,23.5,C,6,1
+              //(Charged,0,Vbat,mV,IR,mOhms,Capacity,mAH,Capacity,mWH,Temp,C,State,Time)
+              Serial.print("2,");
+              Serial.print(vbat_1_1);
+              Serial.print(",");
+              Serial.print(ir1);
+              Serial.print(",");
+              Serial.print(mah1);
+              Serial.print(",");
+              Serial.print(mwh1);
+              Serial.print(",");
+              Serial.print(temp1);
+              Serial.print(",");
+              Serial.println(state1);
+              //Serial.print(",");
+              //Serial.println(settle1);
+            #endif
+            #ifdef MSG24
+              //(Periodic Status,0,Vbat,mV,Ibat,mA,Capacity,mAH,Capacity,mWH,Temp,C,State,Time)
+              Serial.print("1,4,"); //Cell 1, end of charge
+              Serial.print(vbat_1_1);
+              Serial.print(",");
+              Serial.print(ibat_1_1);
+              Serial.print(",");
+              Serial.print(mah1);
+              Serial.print(",");
+              Serial.print(mwh1);
+              Serial.print(",");
+              Serial.print(temp1);
+              Serial.print(",");
+              Serial.println(ir1);
+            #endif
             mah1 = 0;
             mwh1 = 0;
           }
@@ -3547,22 +3643,36 @@ void runStateMachine(void)
       //     mV/2 + mV/8*4    -  mV/8*4*2    /  mA/8  / 125
       //         mV           -  mV          /  A = mOhms
       ir2 = ((voc12 + voc22 * 4.0) - (vload2 * 8.0)) / (iload2 / 125.0);
-      //Msg type 3 (IR): 3,4126.45,mV,4123.15,mOhms,1259.21,mA,4053.12,mV,56.92,mOhms, 7,1
-      //(IR Complete,3,Voc1,mV,Voc2,mV,Iload,mA,Vload,mV,IR,mOhms,State,Time)
-      Serial.print("8,");
-      Serial.print(voc12 * 2.0);
-      Serial.print(",");
-      Serial.print(voc22 * 8.0);
-      Serial.print(",");
-      Serial.print(iload2 * 8.0);
-      Serial.print(",");
-      Serial.print(vload2 * 8.0);
-      Serial.print(",");
-      Serial.print(ir2);
-      Serial.print(",");
-      Serial.println(state2);
-      //Serial.print(",");
-      //Serial.println(settle2);
+      #ifdef MSG20
+        //Msg type 3 (IR): 3,4126.45,mV,4123.15,mOhms,1259.21,mA,4053.12,mV,56.92,mOhms, 7,1
+        //(IR Complete,3,Voc1,mV,Voc2,mV,Iload,mA,Vload,mV,IR,mOhms,State,Time)
+        Serial.print("8,");
+        Serial.print(voc12 * 2.0);
+        Serial.print(",");
+        Serial.print(voc22 * 8.0);
+        Serial.print(",");
+        Serial.print(iload2 * 8.0);
+        Serial.print(",");
+        Serial.print(vload2 * 8.0);
+        Serial.print(",");
+        Serial.print(ir2);
+        Serial.print(",");
+        Serial.println(state2);
+        //Serial.print(",");
+        //Serial.println(settle2);
+      #endif
+      #ifdef MSG24
+        Serial.print("^,3,"); //Cell 2, IR debug
+        Serial.print(voc12 * 2.0);
+        Serial.print(",");
+        Serial.print(voc22 * 8.0);
+        Serial.print(",");
+        Serial.print(iload2 * 8.0);
+        Serial.print(",");
+        Serial.print(vload2 * 8.0);
+        Serial.print(",");
+        Serial.println(ir2);
+      #endif
       irstate2 = 0;
       discharge_offset_2 = discharge_offset_tmp2;
     }
@@ -3620,22 +3730,60 @@ void runStateMachine(void)
       //78.125us/char at 115200
       if (state2 != 8)
       {
-        //Msg type 0 (Periodic Status): 0,3754.12,mV,-1453.98,mA,-750.19,mAH,-2810.34,mWH,23.5,C,4,358
-        //(Periodic Status,0,Vbat,mV,Ibat,mA,Capacity,mAH,Capacity,mWH,Temp,C,State,Time)
-        Serial.print("5,");
-        Serial.print(vbat_1_2);
-        Serial.print(",");
-        Serial.print(ibat_1_2);
-        Serial.print(",");
-        Serial.print(mah2);
-        Serial.print(",");
-        Serial.print(mwh2);
-        Serial.print(",");
-        Serial.print(temp2);
-        Serial.print(",");
-        Serial.println(state2);
-        //Serial.print(",");
-        //Serial.println(settle2);
+        #ifdef MSG20
+          //Msg type 0 (Periodic Status): 0,3754.12,mV,-1453.98,mA,-750.19,mAH,-2810.34,mWH,23.5,C,4,358
+          //(Periodic Status,0,Vbat,mV,Ibat,mA,Capacity,mAH,Capacity,mWH,Temp,C,State,Time)
+          Serial.print("5,");
+          Serial.print(vbat_1_2);
+          Serial.print(",");
+          Serial.print(ibat_1_2);
+          Serial.print(",");
+          Serial.print(mah2);
+          Serial.print(",");
+          Serial.print(mwh2);
+          Serial.print(",");
+          Serial.print(temp2);
+          Serial.print(",");
+          Serial.println(state2);
+          //Serial.print(",");
+          //Serial.println(settle2);
+        #endif
+        #ifdef MSG24
+          //Msg type 0 (Periodic Status): 0,3754.12,mV,-1453.98,mA,-750.19,mAH,-2810.34,mWH,23.5,C,4,358
+          //(Periodic Status,0,Vbat,mV,Ibat,mA,Capacity,mAH,Capacity,mWH,Temp,C,State,Time)
+          Serial.print("2,"); //Cell 2, periodic status
+          if(state2 == 1) //Discharging states
+          {
+            Serial.print("1,");
+          }
+          else if((state2 == 6) || (state2 == 7)) //IR states
+          {
+            Serial.print("5,");
+          }
+          else if((state2 == 3) || (state2 == 4)) //Charging states
+          {
+            Serial.print("2,");
+          }
+          else
+          {
+            Serial.print("6,");
+          }
+          Serial.print(vbat_1_2);
+          Serial.print(",");
+          Serial.print(ibat_1_2);
+          Serial.print(",");
+          Serial.print(mah2);
+          Serial.print(",");
+          //vbuf_i = (int)(((float)getAuxADC(BUFV)) * BUF2V);
+          //Serial.print(vbuf_i); //2.417);
+          Serial.print(mwh2);
+          Serial.print(",");
+          Serial.print(temp2);
+          Serial.print(",");
+          Serial.println(ir2);
+          //Serial.print(",");
+          //Serial.println(settle1);
+        #endif
       }
       /* State machine:
           0. Battery Disconnected (Unused)
@@ -3727,22 +3875,40 @@ void runStateMachine(void)
               setChg2(CHARGE);
               setLED2(LED_CYAN);
             }
-            //Msg type 1 (Discharged): 0,2754.12,mV,32.57,mOhms,893.21,mAH,3295.12,mWH,25.1,C,3,1
-            //(Periodic Status,0,Vbat,mV,IR,mOhms,Capacity,mAH,Capacity,mWH,Temp,C,State,Time)
-            Serial.print("6,");
-            Serial.print(vbat_1_2);
-            Serial.print(",");
-            Serial.print(ir2);
-            Serial.print(",");
-            Serial.print(mah2);
-            Serial.print(",");
-            Serial.print(mwh2);
-            Serial.print(",");
-            Serial.print(temp2);
-            Serial.print(",");
-            Serial.println(state2);
-            //Serial.print(",");
-            //Serial.println(settle2);
+            #ifdef MSG24
+              //Msg type 1 (Discharged): 0,2754.12,mV,32.57,mOhms,893.21,mAH,3295.12,mWH,25.1,C,3,1
+              //(Periodic Status,0,Vbat,mV,IR,mOhms,Capacity,mAH,Capacity,mWH,Temp,C,State,Time)
+              Serial.print("6,");
+              Serial.print(vbat_1_2);
+              Serial.print(",");
+              Serial.print(ir2);
+              Serial.print(",");
+              Serial.print(mah2);
+              Serial.print(",");
+              Serial.print(mwh2);
+              Serial.print(",");
+              Serial.print(temp2);
+              Serial.print(",");
+              Serial.println(state2);
+              //Serial.print(",");
+              //Serial.println(settle2);
+            #endif
+            #ifdef MSG24
+              //Msg type 0 (Periodic Status): 0,3754.12,mV,-1453.98,mA,-750.19,mAH,-2810.34,mWH,23.5,C,4,358
+              //(Periodic Status,0,Vbat,mV,Ibat,mA,Capacity,mAH,Capacity,mWH,Temp,C,State,Time)
+              Serial.print("2,4,"); //Cell 1, end of discharge
+              Serial.print(vbat_1_2);
+              Serial.print(",");
+              Serial.print(ibat_1_2);
+              Serial.print(",");
+              Serial.print(mah2);
+              Serial.print(",");
+              Serial.print(mwh2);
+              Serial.print(",");
+              Serial.print(temp2);
+              Serial.print(",");
+              Serial.println(ir2);
+            #endif
             mah2 = 0;
             mwh2 = 0;
           }
@@ -3860,22 +4026,39 @@ void runStateMachine(void)
                 #endif
               }
             }
-            //Msg type 2 (Charged): 0,4126.45,mV,32.57,mOhms,-750.19,mAH,-2810.34,mWH,23.5,C,6,1
-            //(Charged,0,Vbat,mV,IR,mOhms,Capacity,mAH,Capacity,mWH,Temp,C,State,Time)
-            Serial.print("7,");
-            Serial.print(vbat_1_2);
-            Serial.print(",");
-            Serial.print(ir2);
-            Serial.print(",");
-            Serial.print(mah2);
-            Serial.print(",");
-            Serial.print(mwh2);
-            Serial.print(",");
-            Serial.print(temp2);
-            Serial.print(",");
-            Serial.println(state2);
-            //Serial.print(",");
-            //Serial.println(settle2);
+            #ifdef MSG20
+              //Msg type 2 (Charged): 0,4126.45,mV,32.57,mOhms,-750.19,mAH,-2810.34,mWH,23.5,C,6,1
+              //(Charged,0,Vbat,mV,IR,mOhms,Capacity,mAH,Capacity,mWH,Temp,C,State,Time)
+              Serial.print("7,");
+              Serial.print(vbat_1_2);
+              Serial.print(",");
+              Serial.print(ir2);
+              Serial.print(",");
+              Serial.print(mah2);
+              Serial.print(",");
+              Serial.print(mwh2);
+              Serial.print(",");
+              Serial.print(temp2);
+              Serial.print(",");
+              Serial.println(state2);
+              //Serial.print(",");
+              //Serial.println(settle2);
+            #endif
+            #ifdef MSG24
+              //(Periodic Status,0,Vbat,mV,Ibat,mA,Capacity,mAH,Capacity,mWH,Temp,C,State,Time)
+              Serial.print("2,4,"); //Cell 1, end of charge
+              Serial.print(vbat_1_2);
+              Serial.print(",");
+              Serial.print(ibat_1_2);
+              Serial.print(",");
+              Serial.print(mah2);
+              Serial.print(",");
+              Serial.print(mwh2);
+              Serial.print(",");
+              Serial.print(temp2);
+              Serial.print(",");
+              Serial.println(ir2);
+            #endif
             mah2 = 0;
             mwh2 = 0;
           }
@@ -3923,30 +4106,60 @@ void runStateMachine(void)
             }
           }
         }
-        //Msg type 4 (Debug):
-        //(Debug,4,Vbuf,mV,Vrev,mV,Iload,mA,Vload,mV,IR,mOhms,State,Time)
-        Serial.print("4,");
-        Serial.print(vbuf_i); //2.417);
-        adctemp = getAuxADC(HSTH1);
-        if (adctemp > 1269) //0-35C, use linear estimation
-        {
-          temp_t = ((float)adctemp) / -28.82 + 78.816 + TOFFS2;
-        }
-        else //35C+, use polynomial estimation
-        {
-          temp_t = (((float)adctemp) * ((float)adctemp) * ((float)adctemp) / -20005929.2 + ((float)adctemp) * ((float)adctemp) / 6379.75 + ((float)adctemp) / -4.866 + 144.9107) + TOFFS2;
-        }
-        Serial.print(",");
-        Serial.println(temp_t);//2.417);
-        //Serial.print(",");
-        //Serial.print(ibat_now);//2.417);
-        //Serial.print(",mA,");
-        //Serial.print(vbat_now);//2.417);
-        //Serial.print(",mV,");
-        //Serial.println(duty1);//2.417);
-        //Serial.print(",");
-        //Serial.println(duty2);//2.417);
-        //Serial.println(",Duty2");
+        #ifdef MSG20
+          //Msg type 4 (Debug):
+          //(Debug,4,Vbuf,mV,Vrev,mV,Iload,mA,Vload,mV,IR,mOhms,State,Time)
+          Serial.print("4,");
+          Serial.print(vbuf_i); //2.417);
+          adctemp = getAuxADC(HSTH1);
+          if (adctemp > 1269) //0-35C, use linear estimation
+          {
+            temp_t = ((float)adctemp) / -28.82 + 78.816 + TOFFS2;
+          }
+          else //35C+, use polynomial estimation
+          {
+            temp_t = (((float)adctemp) * ((float)adctemp) * ((float)adctemp) / -20005929.2 + ((float)adctemp) * ((float)adctemp) / 6379.75 + ((float)adctemp) / -4.866 + 144.9107) + TOFFS2;
+          }
+          Serial.print(",");
+          Serial.println(temp_t);//2.417);
+          //Serial.print(",");
+          //Serial.print(ibat_now);//2.417);
+          //Serial.print(",mA,");
+          //Serial.print(vbat_now);//2.417);
+          //Serial.print(",mV,");
+          //Serial.println(duty1);//2.417);
+          //Serial.print(",");
+          //Serial.println(duty2);//2.417);
+          //Serial.println(",Duty2");
+        #endif
+        #ifdef MSG24
+          //Msg type 4 (Debug):
+          //(Debug,4,Vbuf,mV,Vrev,mV,Iload,mA,Vload,mV,IR,mOhms,State,Time)
+          Serial.print("^,1,");
+          Serial.print(vbuf_i); //2.417);
+          adctemp = getAuxADC(HSTH1);
+          if (adctemp > 1269) //0-35C, use linear estimation
+          {
+            temp_t = ((float)adctemp) / -28.82 + 78.816 + TOFFS2;
+          }
+          else //35C+, use polynomial estimation
+          {
+            temp_t = (((float)adctemp) * ((float)adctemp) * ((float)adctemp) / -20005929.2 + ((float)adctemp) * ((float)adctemp) / 6379.75 + ((float)adctemp) / -4.866 + 144.9107) + TOFFS2;
+          }
+          Serial.print(",");
+          Serial.print(temp_t);//2.417);
+          adctemp = getAuxADC(HSTH2);
+          if (adctemp > 939) //0-40C, use linear estimation
+          {
+            temp_t = ((float)adctemp) / -32.56 + 72.980 + TOFFSHS2;
+          }
+          else //40C+, use polynomial estimation
+          {
+            temp_t = (((float)adctemp) * ((float)adctemp) * ((float)adctemp) / -7047334.3 + ((float)adctemp) * ((float)adctemp) / 3173.10 + ((float)adctemp) / -3.6194 + 143.561) + TOFFSHS2;
+          }
+          Serial.print(",");
+          Serial.println(temp_t);//2.417);
+        #endif
       }
       /*if((state1 == 1) || (state2 == 1) || (state1 == 3) || (state2 == 3) || (state1 == 4) || (state2 == 4))
       {
@@ -4547,62 +4760,152 @@ void loop() {
           //adciref = analogRead(AIREF); //Iref voltage
           vbuf_i = (int)(((float)getAuxADC(BUFV)) * BUF2V);
         }
-        //Msg type 4 (Debug):
-        //(Debug,4,Vbuf,mV,Vrev,mV,Iload,mA,Vload,mV,IR,mOhms,State,Time)
-        Serial.print("4,");
-        Serial.print(vbuf_i); //2.417);
-        Serial.print(",");
-        Serial.print(getCell1RV());
-        Serial.print(",");
-        Serial.print(getCell2RV());
-        Serial.print(",");
-        Serial.print(adciref);//2.417);
-        adctemp = getAuxADC(HSTH1);
-        if (adctemp > 939) //0-40C, use linear estimation
-        {
-          temp_t = ((float)adctemp) / -32.56 + 72.980 + TOFFSHS1;
-        }
-        else //40C+, use polynomial estimation
-        {
-          temp_t = (((float)adctemp) * ((float)adctemp) * ((float)adctemp) / -7047334.3 + ((float)adctemp) * ((float)adctemp) / 3173.10 + ((float)adctemp) / -3.6194 + 143.561) + TOFFSHS1;
-        }
-        Serial.print(",");
-        Serial.print(temp_t);//2.417);
-        adctemp = getAuxADC(HSTH2);
-        if (adctemp > 939) //0-40C, use linear estimation
-        {
-          temp_t = ((float)adctemp) / -32.56 + 72.980 + TOFFSHS2;
-        }
-        else //40C+, use polynomial estimation
-        {
-          temp_t = (((float)adctemp) * ((float)adctemp) * ((float)adctemp) / -7047334.3 + ((float)adctemp) * ((float)adctemp) / 3173.10 + ((float)adctemp) / -3.6194 + 143.561) + TOFFSHS2;
-        }
-        Serial.print(",");
-        Serial.println(temp_t);//2.417);
-        Serial.print("9,");
-        Serial.print(vbat_1_1);
-        Serial.print(",");
-        Serial.print(ibat_1_1);
-        Serial.print(",");
-        Serial.print(mah1);
-        Serial.print(",");
-        Serial.print(mwh1);
-        Serial.print(",");
-        Serial.print(temp1);
-        Serial.print(",");
-        Serial.println(ir1);
-        Serial.print("10,");
-        Serial.print(vbat_1_2);
-        Serial.print(",");
-        Serial.print(ibat_1_2);
-        Serial.print(",");
-        Serial.print(mah2);
-        Serial.print(",");
-        Serial.print(mwh2);
-        Serial.print(",");
-        Serial.print(temp2);
-        Serial.print(",");
-        Serial.println(ir2);
+        #ifdef MSG20
+          //Msg type 4 (Debug):
+          //(Debug,4,Vbuf,mV,Vrev,mV,Iload,mA,Vload,mV,IR,mOhms,State,Time)
+          Serial.print("4,");
+          Serial.print(vbuf_i); //2.417);
+          Serial.print(",");
+          Serial.print(getCell1RV());
+          Serial.print(",");
+          Serial.print(getCell2RV());
+          Serial.print(",");
+          Serial.print(adciref);//2.417);
+          adctemp = getAuxADC(HSTH1);
+          if (adctemp > 939) //0-40C, use linear estimation
+          {
+            temp_t = ((float)adctemp) / -32.56 + 72.980 + TOFFSHS1;
+          }
+          else //40C+, use polynomial estimation
+          {
+            temp_t = (((float)adctemp) * ((float)adctemp) * ((float)adctemp) / -7047334.3 + ((float)adctemp) * ((float)adctemp) / 3173.10 + ((float)adctemp) / -3.6194 + 143.561) + TOFFSHS1;
+          }
+          Serial.print(",");
+          Serial.print(temp_t);//2.417);
+          adctemp = getAuxADC(HSTH2);
+          if (adctemp > 939) //0-40C, use linear estimation
+          {
+            temp_t = ((float)adctemp) / -32.56 + 72.980 + TOFFSHS2;
+          }
+          else //40C+, use polynomial estimation
+          {
+            temp_t = (((float)adctemp) * ((float)adctemp) * ((float)adctemp) / -7047334.3 + ((float)adctemp) * ((float)adctemp) / 3173.10 + ((float)adctemp) / -3.6194 + 143.561) + TOFFSHS2;
+          }
+          Serial.print(",");
+          Serial.println(temp_t);//2.417);
+        #endif
+        #ifdef MSG24
+          //Msg type 4 (Debug):
+          //(Debug,4,Vbuf,mV,Vrev,mV,Iload,mA,Vload,mV,IR,mOhms,State,Time)
+          Serial.print("^,1,");
+          Serial.print(vbuf_i); //2.417);
+          adctemp = getAuxADC(HSTH1);
+          if (adctemp > 1269) //0-35C, use linear estimation
+          {
+            temp_t = ((float)adctemp) / -28.82 + 78.816 + TOFFS2;
+          }
+          else //35C+, use polynomial estimation
+          {
+            temp_t = (((float)adctemp) * ((float)adctemp) * ((float)adctemp) / -20005929.2 + ((float)adctemp) * ((float)adctemp) / 6379.75 + ((float)adctemp) / -4.866 + 144.9107) + TOFFS2;
+          }
+          Serial.print(",");
+          Serial.print(temp_t);//2.417);
+          adctemp = getAuxADC(HSTH2);
+          if (adctemp > 939) //0-40C, use linear estimation
+          {
+            temp_t = ((float)adctemp) / -32.56 + 72.980 + TOFFSHS2;
+          }
+          else //40C+, use polynomial estimation
+          {
+            temp_t = (((float)adctemp) * ((float)adctemp) * ((float)adctemp) / -7047334.3 + ((float)adctemp) * ((float)adctemp) / 3173.10 + ((float)adctemp) / -3.6194 + 143.561) + TOFFSHS2;
+          }
+          Serial.print(",");
+          Serial.println(temp_t);//2.417);
+        #endif
+        #ifdef MSG20
+          Serial.print("9,");
+          Serial.print(vbat_1_1);
+          Serial.print(",");
+          Serial.print(ibat_1_1);
+          Serial.print(",");
+          Serial.print(mah1);
+          Serial.print(",");
+          Serial.print(mwh1);
+          Serial.print(",");
+          Serial.print(temp1);
+          Serial.print(",");
+          Serial.println(ir1);
+          Serial.print("10,");
+          Serial.print(vbat_1_2);
+          Serial.print(",");
+          Serial.print(ibat_1_2);
+          Serial.print(",");
+          Serial.print(mah2);
+          Serial.print(",");
+          Serial.print(mwh2);
+          Serial.print(",");
+          Serial.print(temp2);
+          Serial.print(",");
+          Serial.println(ir2);
+        #endif
+        #ifdef MSG24
+          Serial.print("1,"); //Cell 1, periodic status
+          if(state1 == 1) //Discharging states
+          {
+            Serial.print("1,");
+          }
+          else if((state1 == 6) || (state2 == 7)) //IR states
+          {
+            Serial.print("5,");
+          }
+          else if((state1 == 3) || (state2 == 4)) //Charging states
+          {
+            Serial.print("2,");
+          }
+          else
+          {
+            Serial.print("6,");
+          }
+          Serial.print(vbat_1_1);
+          Serial.print(",");
+          Serial.print(ibat_1_1);
+          Serial.print(",");
+          Serial.print(mah1);
+          Serial.print(",");
+          Serial.print(mwh1);
+          Serial.print(",");
+          Serial.print(temp1);
+          Serial.print(",");
+          Serial.println(ir1);
+          Serial.print("2,"); //Cell 2, periodic status
+          if(state1 == 1) //Discharging states
+          {
+            Serial.print("1,");
+          }
+          else if((state1 == 6) || (state2 == 7)) //IR states
+          {
+            Serial.print("5,");
+          }
+          else if((state1 == 3) || (state2 == 4)) //Charging states
+          {
+            Serial.print("2,");
+          }
+          else
+          {
+            Serial.print("6,");
+          }
+          Serial.print(vbat_1_2);
+          Serial.print(",");
+          Serial.print(ibat_1_2);
+          Serial.print(",");
+          Serial.print(mah2);
+          Serial.print(",");
+          Serial.print(mwh2);
+          Serial.print(",");
+          Serial.print(temp2);
+          Serial.print(",");
+          Serial.println(ir2);
+        #endif
         Serial.print("\r\n> ");
         break;
       #ifdef OLED_ENABLED
