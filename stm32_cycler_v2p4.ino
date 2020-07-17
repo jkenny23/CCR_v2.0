@@ -43,7 +43,7 @@
 
 volatile int interruptCounter;
 
-const char vers[] = "2.0-07152020"; 
+const char vers[] = "2.0-07162020"; 
 
 #define AFTERDISWAIT 300//300 //300s after charging wait time
 #define CHGSETTLEWAIT 15//30 //30s after starting charge settle time
@@ -2782,6 +2782,8 @@ void parseCycle2(uint8 nArgs, char* args[])
 
 void runStateMachine(void)
 {
+  unsigned char discharge_offset_tmp1 = 0;
+  unsigned char discharge_offset_tmp2 = 0;
   loop1++;
   loop2++;
 
@@ -3081,6 +3083,8 @@ void runStateMachine(void)
     //digitalWrite(PB12, HIGH);
     if (irstate1 == 2)
     {
+      discharge_offset_tmp1 = discharge_offset_1;
+      discharge_offset_1 = 100;
       //Iload in mA/8 (mA*2 * (500/2000) * 0.25)
       iload1 = iload1 + ((float)adcval1 - adciref) / ADC2I1; //Accumulate current samples from 250-500ms
       //Vload in mV/8 (mV*2 * (500/2000) * 0.25)
@@ -3142,6 +3146,7 @@ void runStateMachine(void)
       //Serial.print(",");
       //Serial.println(settle1);
       irstate1 = 0;
+      discharge_offset_1 = discharge_offset_tmp1;
     }
 
     //1Hz loop: Periodic status printing, temp measurement
@@ -3496,6 +3501,8 @@ void runStateMachine(void)
     //digitalWrite(PB12, HIGH);
     if (irstate2 == 2)
     {
+      discharge_offset_tmp2 = discharge_offset_2;
+      discharge_offset_2 = 100;
       //Iload in mA/8 (mA*2 * (500/2000) * 0.25)
       iload2 = iload2 + ((float)adcval4 - adciref) / ADC2I2; //Accumulate current samples from 250-500ms
       //Vload in mV/8 (mV*2 * (500/2000) * 0.25)
@@ -3557,6 +3564,7 @@ void runStateMachine(void)
       //Serial.print(",");
       //Serial.println(settle2);
       irstate2 = 0;
+      discharge_offset_2 = discharge_offset_tmp2;
     }
 
     //1Hz loop: Periodic status printing, temp measurement
