@@ -22,15 +22,16 @@
 //#define HW_1_0
 //#define HW_2_0
 #define HW_2_4
+//#define MINI
 //#define DEBUG_MODE
 #define REGEN_ENABLED
 //#define MON_SHUNT
-//#define V_1S //220k/150k 0-4.84V
+#define V_1S //220k/150k 0-4.84V
 //#define V_2S //430k/150k 0-9.46V, 2s charging allowed
-#define V_2S1 //430k/150k 0-9.46V, only 1s charging allowed
+//#define V_2S1 //430k/150k 0-9.46V, only 1s charging allowed
 //#define LP //Low power, 4A limit, 1.65A shunt, 90kHz Fsw
-//#define MSG20 //2.0- message format
-#define MSG24 //2.1+ message format
+#define MSG20 //2.0- message format
+//#define MSG24 //2.1+ message format
 
 #ifdef OLED_ENABLED
   #include <Adafruit_GFX_AS.h>
@@ -45,7 +46,7 @@
 
 volatile int interruptCounter;
 
-const char vers[] = "2.0-07172020"; 
+const char vers[] = "2.0-09082020"; 
 
 #define AFTERDISWAIT 300//300 //300s after charging wait time
 #define CHGSETTLEWAIT 15//30 //30s after starting charge settle time
@@ -67,17 +68,15 @@ const char vers[] = "2.0-07172020";
 //Pin definitions - Analog inputs
 #define AC1V PB0 //Cell 1 voltage input
 #define AC1A PB1 //Cell 1 current input
-#ifndef HW_1_0
+#ifndef HW_1_0 //If NOT HW1.0, use these defines:
   #define AC1T PA3 //Cell 1 temperature input
   #define AC1R PA1 //Cell 1 reverse voltage input
-#endif
-#define AC2V PA6 //Cell 2 voltage input
-#define AC2A PA7 //Cell 2 current input
-#ifndef HW_1_0
   #define AC2T PA2 //Cell 2 temperature input
   #define AC2R PA0 //Cell 2 reverse voltage input
   #define ABUFV PA4 //Buffer/input voltage input
 #endif
+#define AC2V PA6 //Cell 2 voltage input
+#define AC2A PA7 //Cell 2 current input
 #define AIREF PA5 //Reference voltage input
 //Pin definitions - Digital outputs
 #define OC1NF2 PB6 //CC 1 setting output
@@ -445,30 +444,46 @@ unsigned short getAuxADC(unsigned char adcsel) {
       #define HSTH2 1
       #define BUFV 2*/
     case HSTH1:
-      pinMode(AUXSEL1, OUTPUT);
-      digitalWrite(AUXSEL1, HIGH);
-      pinMode(AUXSEL2, OUTPUT);
-      digitalWrite(AUXSEL2, HIGH);
-      return analogRead(ABUFV);
+      #ifdef MINI
+        return analogRead(AC2T);
+      #else
+        pinMode(AUXSEL1, OUTPUT);
+        digitalWrite(AUXSEL1, HIGH);
+        pinMode(AUXSEL2, OUTPUT);
+        digitalWrite(AUXSEL2, HIGH);
+        return analogRead(ABUFV);
+      #endif
       break;
     case HSTH2:
-      pinMode(AUXSEL2, OUTPUT);
-      digitalWrite(AUXSEL2, LOW);
-      return analogRead(ABUFV);
+      #ifdef MINI
+        return analogRead(AC2T);
+      #else
+        pinMode(AUXSEL2, OUTPUT);
+        digitalWrite(AUXSEL2, LOW);
+        return analogRead(ABUFV);
+      #endif
       break;
     case BUFV:
-      pinMode(AUXSEL1, OUTPUT);
-      digitalWrite(AUXSEL1, LOW);
-      pinMode(AUXSEL2, OUTPUT);
-      digitalWrite(AUXSEL2, HIGH);
-      return analogRead(ABUFV);
+      #ifdef MINI
+        return analogRead(ABUFV);
+      #else
+        pinMode(AUXSEL1, OUTPUT);
+        digitalWrite(AUXSEL1, LOW);
+        pinMode(AUXSEL2, OUTPUT);
+        digitalWrite(AUXSEL2, HIGH);
+        return analogRead(ABUFV);
+      #endif
       break;
     default:
-      pinMode(AUXSEL1, OUTPUT);
-      digitalWrite(AUXSEL1, HIGH);
-      pinMode(AUXSEL2, OUTPUT);
-      digitalWrite(AUXSEL2, HIGH);
-      return analogRead(ABUFV);
+      #ifdef MINI
+        return analogRead(AC2T);
+      #else
+        pinMode(AUXSEL1, OUTPUT);
+        digitalWrite(AUXSEL1, HIGH);
+        pinMode(AUXSEL2, OUTPUT);
+        digitalWrite(AUXSEL2, HIGH);
+        return analogRead(ABUFV);
+      #endif
       break;
   }
 }
@@ -3875,7 +3890,7 @@ void runStateMachine(void)
               setChg2(CHARGE);
               setLED2(LED_CYAN);
             }
-            #ifdef MSG24
+            #ifdef MSG20
               //Msg type 1 (Discharged): 0,2754.12,mV,32.57,mOhms,893.21,mAH,3295.12,mWH,25.1,C,3,1
               //(Periodic Status,0,Vbat,mV,IR,mOhms,Capacity,mAH,Capacity,mWH,Temp,C,State,Time)
               Serial.print("6,");
