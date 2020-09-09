@@ -26,9 +26,9 @@
 //#define DEBUG_MODE
 #define REGEN_ENABLED
 //#define MON_SHUNT
-#define V_1S //220k/150k 0-4.84V
+//#define V_1S //220k/150k 0-4.84V
 //#define V_2S //430k/150k 0-9.46V, 2s charging allowed
-//#define V_2S1 //430k/150k 0-9.46V, only 1s charging allowed
+#define V_2S1 //430k/150k 0-9.46V, only 1s charging allowed
 //#define LP //Low power, 4A limit, 1.65A shunt, 90kHz Fsw
 #define MSG20 //2.0- message format
 //#define MSG24 //2.1+ message format
@@ -46,7 +46,7 @@
 
 volatile int interruptCounter;
 
-const char vers[] = "2.0-09082020"; 
+const char vers[] = "2.0-09092020"; 
 
 #define AFTERDISWAIT 300//300 //300s after charging wait time
 #define CHGSETTLEWAIT 15//30 //30s after starting charge settle time
@@ -968,13 +968,6 @@ void setup() {
   #ifdef REGEN_ENABLED
   Serial.println(" Regen Enabled");
   #endif
-  estatus = EEPROM.read(DSNADDR, &wData);
-  if(estatus == 0)
-  {
-      Serial.print("> Device SN: ");
-      Serial.println(wData);
-  }
-  Serial.println("");
 
   estatus = EEPROM.init();
   if(estatus != 0)
@@ -982,6 +975,14 @@ void setup() {
     Serial.print("> EEPROM init err: ");
     Serial.println(estatus, HEX);
   }
+  
+  estatus = EEPROM.read(DSNADDR, &wData);
+  if(estatus == 0)
+  {
+      Serial.print("> Device SN: ");
+      Serial.println(wData);
+  }
+  Serial.println("");
   
   Serial.println("> Init cal from EEPROM");
   estatus = EEPROM.read(REFAVALADDR, &wData);
@@ -4742,6 +4743,11 @@ void loop() {
       case 'v':        
         Serial.print("\r\n> Software version: ");
         Serial.println(vers);
+        if(EEPROM.read(DSNADDR, &wData) == 0)
+        {
+            Serial.print("> Device SN: ");
+            Serial.println(wData);
+        }
         Serial.print("\r\n> ");
         break;
       case 'q':
