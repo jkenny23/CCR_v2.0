@@ -37,42 +37,42 @@ void printMenu(unsigned char menu2, USBSerial &serRef) {
       serRef.println("> Charging");
       serRef.println(">  Press n to end");
       serRef.print("\r\n");
-      serRef.print("> ");
       break;
     case 1:
       serRef.print("\r\n");
       serRef.println("> Discharging");
       serRef.println(">  Press n to end");
       serRef.print("\r\n");
-      serRef.print("> ");
       break;
     case 2:
       serRef.print("\r\n");
       serRef.println("> Cycle Testing");
       serRef.println(">  Press n to end");
       serRef.print("\r\n");
-      serRef.print("> ");
       break;
     case 3:
       serRef.print("\r\n");
       serRef.println("> PSU Mode");
       serRef.println(">  Press n to end");
       serRef.print("\r\n");
-      serRef.print("> ");
       break;
     case 4:
       serRef.print("\r\n");
       serRef.println("> Test Mode");
       serRef.println(">  Press n to end");
       serRef.print("\r\n");
-      serRef.print("> ");
       break;
     case 6:
       serRef.print("\r\n");
       serRef.println("> IR Test");
       serRef.println(">  Press n to end");
       serRef.print("\r\n");
-      serRef.print("> ");
+      break;
+    case 7:
+      serRef.print("\r\n");
+      serRef.println("> Waiting");
+      serRef.println(">  Press n to end");
+      serRef.print("\r\n");
       break;
     default:
       //'c', 'd', 'y', 'p', 't', 'n', '?', 'v', 's', 'l', 'r', 'z', 'q', 'a'
@@ -107,6 +107,9 @@ void printMenu(unsigned char menu2, USBSerial &serRef) {
       serRef.println(">  IR Test Mode");
       serRef.println(">   r[1-2] i[test current, mA] r[direction: 0 = resistive, 2 = regen]");
       serRef.println(">            100-1500, def.1500  def.0");
+      serRef.println(">  Wait");
+      serRef.println(">   w[1-2] i[time, s]");
+      serRef.println(">            1-32767, def.30");
       serRef.println(">  Test Mode (raw PWM duty)");
       serRef.println(">   q[1-2] l[duty cycle (0-399)] r[direction: 0 = resistive, 2 = regen]");
       serRef.println(">            0-399                 def.0");
@@ -127,4 +130,3 @@ void printMenu(unsigned char menu2, USBSerial &serRef) {
       break;
   }
 }
-
