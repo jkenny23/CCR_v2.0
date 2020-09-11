@@ -46,7 +46,7 @@
 
 volatile int interruptCounter;
 
-const char vers[] = "2.0-09092020"; 
+const char vers[] = "2.0-09102020"; 
 
 #define AFTERDISWAIT 300//300 //300s after charging wait time
 #define CHGSETTLEWAIT 15//30 //30s after starting charge settle time
@@ -233,6 +233,7 @@ const char vers[] = "2.0-09092020";
 #define CELLVINC 10
 #define DEF_DIS_MODE 0
 #define DEF_DCCC 400
+#define DEF_WAIT_TIME 30 //seconds to wait
 #define DEF_CYCLES 1
 #define OVT_THRESH 45
 #define LED_BRIGHTNESS 80 //1-255 for LED brightness
@@ -423,6 +424,10 @@ volatile uint16 devicepwr = 0;
 volatile uint32 tick = 0;
 volatile uint32 last_tick = 0;
 volatile uint32 last_tick_fan = 0;
+volatile uint16 wait_time_1 = 0;
+volatile uint16 wait_time_2 = 0;
+volatile uint8 waiting_1 = 0;
+volatile uint8 waiting_2 = 0;
 //HardwareTimer timer1(1);
 //HardwareTimer timer2(2);
 
@@ -1206,7 +1211,7 @@ void updateADCRef(){
 void recvWithStartEndMarkers() {
   static boolean recvInProgress = false;
   static byte ndx = 0;
-  char startMarkers[] = {'c', 'd', 'y', 'p', 't', 'n', '?', 'v', 's', 'l', 'r', 'z', 'q', 'a'};
+  char startMarkers[] = {'c', 'd', 'y', 'p', 't', 'n', '?', 'v', 's', 'l', 'r', 'z', 'q', 'a', 'w'};
   char endMarkers[] = {'\n', '\r'};
   char rc;
 
@@ -1259,8 +1264,9 @@ void recvWithStartEndMarkers() {
       }
     }
 
-    else if (rc == startMarkers[0] || rc == startMarkers[1] || rc == startMarkers[2] || rc == startMarkers[3] || rc == startMarkers[9] || rc == startMarkers[11] || rc == startMarkers[13]
-             || rc == startMarkers[4] || rc == startMarkers[5] || rc == startMarkers[6] || rc == startMarkers[7] || rc == startMarkers[8] || rc == startMarkers[10] || rc == startMarkers[12]) {
+    else if (rc == startMarkers[0] || rc == startMarkers[1] || rc == startMarkers[2] || rc == startMarkers[3] || rc == startMarkers[9]
+             || rc == startMarkers[11] || rc == startMarkers[13] || rc == startMarkers[4] || rc == startMarkers[5] || rc == startMarkers[6]
+             || rc == startMarkers[7] || rc == startMarkers[8] || rc == startMarkers[10] || rc == startMarkers[12] || rc == startMarkers[14]) {
       /*Serial.println("Received startMarker");
         Serial.print("ndx=");
         Serial.println(ndx);
@@ -1611,6 +1617,46 @@ void parseIR1(uint8 nArgs, char* args[])
     {
       Serial.println("Regen");
     }
+  }
+}
+
+void parseWait1(uint8 nArgs, char* args[])
+{
+  uint16 i;
+  int16 strVal = 0;
+  
+  //Set default wait time
+  wait_time_1 = DEF_WAIT_TIME;
+
+  Serial.print("\r\n");
+  if(nArgs>1)
+  {
+    for(i=1; i<nArgs; i++)
+    {
+      switch (args[i][0])
+      {
+        case 'i':
+          Serial.print("> Using time: ");
+          strVal = fast_atoi_leading_pos(args[i]);
+          if(strVal>32767)
+            strVal = 32767;
+          else if(strVal<1)
+            strVal = 1;
+          wait_time_1 = strVal;
+          Serial.print(wait_time_1);
+          Serial.println("s");
+          break;
+        default:
+          break;
+      }
+    }
+  }
+  
+  if(wait_time_1 == DEF_WAIT_TIME)
+  {
+    Serial.print("> Using def time: ");
+    Serial.print(wait_time_1);
+    Serial.println("s");
   }
 }
 
@@ -2371,6 +2417,46 @@ void parseIR2(uint8 nArgs, char* args[])
     {
       Serial.println("Regen");
     }
+  }
+}
+
+void parseWait2(uint8 nArgs, char* args[])
+{
+  uint16 i;
+  int16 strVal = 0;
+  
+  //Set default wait time
+  wait_time_2 = DEF_WAIT_TIME;
+
+  Serial.print("\r\n");
+  if(nArgs>1)
+  {
+    for(i=1; i<nArgs; i++)
+    {
+      switch (args[i][0])
+      {
+        case 'i':
+          Serial.print("> Using time: ");
+          strVal = fast_atoi_leading_pos(args[i]);
+          if(strVal>32767)
+            strVal = 32767;
+          else if(strVal<1)
+            strVal = 1;
+          wait_time_2 = strVal;
+          Serial.print(wait_time_2);
+          Serial.println("s");
+          break;
+        default:
+          break;
+      }
+    }
+  }
+  
+  if(wait_time_2 == DEF_WAIT_TIME)
+  {
+    Serial.print("> Using def time: ");
+    Serial.print(wait_time_2);
+    Serial.println("s");
   }
 }
 
@@ -3487,10 +3573,59 @@ void runStateMachine(void)
           break;
         case 5:
           //Serial.println("Case 5");
-          if (settle1 > AFTERCHGWAIT) //1 Minutes to settle after charging
+          if (waiting_1)
           {
-            state1 = 6;
-            settle1 = 0;
+            wait_time_1--;
+            if(wait_time_1 == 0)
+            {
+              waiting_1 = 0;
+              setChg1(DISCONNECT);
+              state1 = 8;
+              settle1 = 0;
+              mode1 = 5;
+              setLED1(LED_OFF);
+              #ifdef MSG20
+                //Msg type 2 (Charged): 0,4126.45,mV,32.57,mOhms,-750.19,mAH,-2810.34,mWH,23.5,C,6,1
+                //(Charged,0,Vbat,mV,IR,mOhms,Capacity,mAH,Capacity,mWH,Temp,C,State,Time)
+                Serial.print("2,");
+                Serial.print(vbat_1_1);
+                Serial.print(",");
+                Serial.print(ir1);
+                Serial.print(",");
+                Serial.print(mah1);
+                Serial.print(",");
+                Serial.print(mwh1);
+                Serial.print(",");
+                Serial.print(temp1);
+                Serial.print(",");
+                Serial.println(state1);
+                //Serial.print(",");
+                //Serial.println(settle1);
+              #endif
+              #ifdef MSG24
+                //(Periodic Status,0,Vbat,mV,Ibat,mA,Capacity,mAH,Capacity,mWH,Temp,C,State,Time)
+                Serial.print("1,4,"); //Cell 1, end of charge
+                Serial.print(vbat_1_1);
+                Serial.print(",");
+                Serial.print(ibat_1_1);
+                Serial.print(",");
+                Serial.print(mah1);
+                Serial.print(",");
+                Serial.print(mwh1);
+                Serial.print(",");
+                Serial.print(temp1);
+                Serial.print(",");
+                Serial.println(ir1);
+              #endif
+            }
+          }
+          else
+          {
+            if (settle1 > AFTERCHGWAIT) //1 Minutes to settle after charging
+            {
+              state1 = 6;
+              settle1 = 0;
+            }
           }
           break;
         case 6: //IR measure state
@@ -3980,10 +4115,59 @@ void runStateMachine(void)
           break;
         case 5:
           //Serial.println("Case 5");
-          if (settle2 > AFTERCHGWAIT) //1 Minutes to settle after charging
+          if (waiting_2)
           {
-            state2 = 6;
-            settle2 = 0;
+            wait_time_2--;
+            if(wait_time_2 == 0)
+            {
+              waiting_2 = 0;
+              setChg2(DISCONNECT);
+              state2 = 8;
+              settle2 = 0;
+              mode2 = 5;
+              setLED2(LED_OFF);
+              #ifdef MSG20
+                //Msg type 2 (Charged): 0,4126.45,mV,32.57,mOhms,-750.19,mAH,-2810.34,mWH,23.5,C,6,1
+                //(Charged,0,Vbat,mV,IR,mOhms,Capacity,mAH,Capacity,mWH,Temp,C,State,Time)
+                Serial.print("7,");
+                Serial.print(vbat_1_2);
+                Serial.print(",");
+                Serial.print(ir2);
+                Serial.print(",");
+                Serial.print(mah2);
+                Serial.print(",");
+                Serial.print(mwh2);
+                Serial.print(",");
+                Serial.print(temp2);
+                Serial.print(",");
+                Serial.println(state2);
+                //Serial.print(",");
+                //Serial.println(settle2);
+              #endif
+              #ifdef MSG24
+                //(Periodic Status,0,Vbat,mV,Ibat,mA,Capacity,mAH,Capacity,mWH,Temp,C,State,Time)
+                Serial.print("2,4,"); //Cell 1, end of charge
+                Serial.print(vbat_1_2);
+                Serial.print(",");
+                Serial.print(ibat_1_2);
+                Serial.print(",");
+                Serial.print(mah2);
+                Serial.print(",");
+                Serial.print(mwh2);
+                Serial.print(",");
+                Serial.print(temp2);
+                Serial.print(",");
+                Serial.println(ir2);
+              #endif
+            }
+          }
+          else
+          {
+            if (settle2 > AFTERCHGWAIT) //1 Minutes to settle after charging
+            {
+              state2 = 6;
+              settle2 = 0;
+            }
           }
           break;
         case 6: //IR measure state
@@ -4418,6 +4602,30 @@ void loop() {
             setLED2(LED_PURPLE);
             printMenu(mode2, Serial);
           }
+        }
+        break;
+      case 'w':
+        if(args[0][1] == '1')
+        {
+          setChg1(DISCONNECT);
+          waiting_1 = 1;
+          mode1 = 7;
+          parseWait1(i, args);
+          state1 = 5;
+          settle1 = 0;
+          setLED1(LED_PURPLE);
+          printMenu(mode1, Serial);
+        }
+        else if(args[0][1] == '2')
+        {
+          setChg2(DISCONNECT);
+          waiting_2 = 1;
+          mode2 = 7;
+          parseWait2(i, args);
+          state2 = 5;
+          settle2 = 0;
+          setLED2(LED_PURPLE);
+          printMenu(mode2, Serial);
         }
         break;
       case 'y':
@@ -5057,4 +5265,3 @@ void handler_loop(void) {
   interruptCounter++;
   tick++;
 }
-
