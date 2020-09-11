@@ -1,20 +1,20 @@
-import time
 import os
 import sys
 import serial
 import logging
 
-class usbSerial():
+
+class usbSerial:
 
     def __init__(self, port):
-        self.device = None
+        self.serial = None
         self.port = port
         self._state = 'disconnected'
         self.log = logging.getLogger(__name__)
 
     def connect(self):
         try:
-            self.device = serial.Serial(
+            self.serial = serial.Serial(
                 port=self.port,
                 baudrate=115200,
                 parity=serial.PARITY_NONE,
@@ -22,13 +22,12 @@ class usbSerial():
                 bytesize=serial.EIGHTBITS,
                 timeout=0.5
             )
-            # TODO huh what was this for self.is_connected()
-        except serial.serialutil.SerialException as e:
+        except serial.serialutil.SerialException:
             exc_type, exc_obj, exc_tb = sys.exc_info()
             fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
             self.log.error(exc_type, fname, exc_tb.tb_lineno)
             return False
-        except Exception as e:
+        except Exception:
             exc_type, exc_obj, exc_tb = sys.exc_info()
             fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
             self.log.error(exc_type, fname, exc_tb.tb_lineno)
@@ -37,27 +36,24 @@ class usbSerial():
         return True
 
     def close(self):
-        self.device.close()
+        self.serial.close()
 
     def is_connected(self):
-        # if self.device is None:
-        #    raise Exception("usbSerial device not connected: None")
-        self._state = 'connected' if self.device.isOpen() else 'disconnected'
-        return self._state
+        self._state = 'connected' if self.serial.isOpen() else 'disconnected'
+        return self._state == "connected"
 
     def readlines(self):
         try:
-            if self.device.inWaiting() > 0:
-                return [ line.strip().decode("utf-8")  for line in self.device.readlines() ]
+            if self.serial.inWaiting() > 0:
+                return [line.strip().decode("utf-8") for line in self.serial.readlines()]
             else:
                 return []
-        except serial.serialutil.SerialException as e:
+        except serial.serialutil.SerialException:
             exc_type, exc_obj, exc_tb = sys.exc_info()
             fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
             self.log.error(exc_type, fname, exc_tb.tb_lineno)
-            #if not self.device.isOpen():
-            self.device.connect()
-        except Exception as e:
+            self.serial.connect()
+        except Exception:
             exc_type, exc_obj, exc_tb = sys.exc_info()
             fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
             self.log.error(exc_type, fname, exc_tb.tb_lineno)
@@ -68,8 +64,7 @@ class usbSerial():
 
         try:
             self.log.debug("Sending: {}".format(data.strip()))
-            self.device.write(data.encode())
-            #time.sleep(1)
+            self.serial.write(data.encode())
         except Exception as e:
             self.log.error(e)
             exc_type, exc_obj, exc_tb = sys.exc_info()

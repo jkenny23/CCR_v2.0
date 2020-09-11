@@ -1,13 +1,14 @@
 import argparse
 import sqlite3
+import os
 import sys
 import time
 import traceback
+import configparser
 
 from mod_serial import usbSerial
 
-usb_dev = 'COM10'
-#test_line = "y1 i500 k2500 l1 r0"
+usb_dev = 'COM3'
 test_line = "d1 i1067 v2500"
 
 charge_cmd = 'c1 i6400 e1080'
@@ -16,6 +17,8 @@ get_status_cmd = 's'
 wait_cmd = 'c1 i1600 o400 e3600'
 discharge_cmd = 'd1 i1600 v2500'
 
+class StageCompleted(BaseException):
+    pass
 
 class Cycler():
     def __init__(self):
@@ -72,8 +75,8 @@ class Cycler():
     # Communicate to arduino, ensure response
     # ________________________________________
     def sync(self):
-        if not self.device:
-            raise ("Device not connected, device is: {}".format(self.device))
+        if not self.device.serial:
+            raise Exception("Device not connected, device is: {}".format(self.device))
 
         print("Sending NL to get a prompt")
         self.device.sendline("\n")
@@ -175,6 +178,71 @@ class Cycler():
     def process_sequence_data(self, line):
         pass
 
+    def start_profile(self, args):
+        config = configparser.ConfigParser()
+
+        # Profile checks
+        if not os.path.isfile('profiles.ini'):
+            print("profile.ini does not exist, please create one with profiles set")
+            sys.exit(1)
+
+        config.read('profiles.ini')
+        if args.profile_name not in config.sections():
+            print(config.sections())
+            print("Profile '{}' does not exist in profiles.ini".format(args.profile_name))
+            sys.exit()
+
+        # Validate commands in profile
+        for stage, command in config[args.profile_name].items():
+            print("Stage: {} Command: {}".format(stage, command))
+            if command.split(" ")[0] not in ['c1', 'c2', 'd1', 'd2', 'r1', 'r2', 'w1', 'w2']:
+                print("'{}' is not a support profile command, only c[12], d[12] or r[12] can be used".format(
+                    command.split(" ")[0]
+                ))
+                sys.exit(1)
+
+        # Run commands in profile
+        try:
+            self.create_tables()
+
+            # Initialize serial device
+            self.init()
+            print('Cycler cycle mode running')
+
+            for stage, command in config[args.profile_name].items():
+                print("Stage: {} Command: {}".format(stage, command))
+
+                self.device.sendline(command.strip() + "\n")
+
+                try:
+                    while self.device.is_connected():
+                        if self.device.serial is None:
+                            print("Re-initializing lost comms")
+                            self.init()
+
+                        #
+                        # check for serial data
+                        # _______________
+                        for line in self.device.readlines():
+                            if line:
+                                values = self.process_cycle_data(line)
+                                print("Stage: {}, Values: {}".format(stage, values))
+                                if values[0] in ['1', '6', '2', '7']:
+                                    raise StageCompleted(stage)  # to next stage
+                        # Hard coded 0.5 second pause between stages
+                        time.sleep(0.5)
+                except StageCompleted as e:
+                    print("Stage: '{}' Completed -----------------".format(e))
+        except KeyboardInterrupt:
+            self.disconnect()
+
+            print()
+            print("Shutdown completed")
+            sys.exit()
+
+        print("Profile command run completed for profile: {}".format(args.profile_name))
+        sys.exit()
+
     def start_sequence(self, args):
         # Initialize serial device
         self.init()
@@ -222,11 +290,11 @@ class Cycler():
                             waiting = False
 
                 # Send discharge cmd
-                #self.device.sendline(discharge_cmd + "\n")
+                # self.device.sendline(discharge_cmd + "\n")
 
                 # Process readouts until mode 1 received
-                #waiting = True
-                #while waiting:
+                # waiting = True
+                # while waiting:
                 #    for line in self.device.readlines():
                 #        if line and self.process_cycle_data(line)[0] == "1":
                 #            waiting = False
@@ -255,7 +323,14 @@ def setup_cmd_line():
     sequence.add_argument('-r', '--repeat', default=1, required=False, help='Number of charge/discharge cycles to run')
     sequence.add_argument('-w', '--wait', default=wait_sec, required=False,
                           help='Number of seconds to sleep between charge and discharge cycle')
+
     sequence.set_defaults(func=Cycler().start_sequence)
+
+    # Normal Cycle
+    profile = subparser.add_parser('profile', help='Profile sequence command set')
+    profile.add_argument('-p', '--profile', dest='profile_name', default=None, required=True,
+                         help='Profile name defined in profiles.ini')
+    profile.set_defaults(func=Cycler().start_profile)
 
     if len(sys.argv[1:]) == 0:
         parser.print_help()

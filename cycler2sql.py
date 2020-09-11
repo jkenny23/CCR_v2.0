@@ -22,7 +22,7 @@ class Cycler():
             try:
                 self.device.connect()
             except Exception as e:
-                if not self.device:
+                if not self.device.serial:
                     print("Closing serial")
                     self.device.close()
                 print("Serial connect failed: {}".format(e))
@@ -62,7 +62,7 @@ class Cycler():
     # Communicate to arduino, ensure response
     #________________________________________
     def sync(self):
-        if not self.device:
+        if not self.device.serial:
             raise("Device not connected, device is: {}".format(self.device))
 
         print("Sending NL to get a prompt")
