@@ -18,7 +18,8 @@ get_status_cmd = 's'
 wait_cmd = 'c1 i1600 o400 e3600'
 discharge_cmd = 'd1 i1600 v2500'
 db_name = "cell_database"
-
+version = "none"
+serialnum = "none"
 
 class StageCompleted(BaseException):
     pass
@@ -103,6 +104,20 @@ class Cycler():
             print("checking: {}".format(line))
             if '> Select Mode:' in line:
                 print('Initialized')
+                
+                self.device.sendline("v\n")
+                time.sleep(0.1)
+                #checking version and serial
+                data = self.device.readlines()
+                for line in data:
+                    print("Received: {}".format(line))
+                    line2 = self.process_version(line)
+                    if '> Software' in line:
+                        version = line2[3]
+                        print("Version: {}".format(version))
+                    if '> Device' in line:
+                        serialnum = line2[3]
+                        print("Serial: {}".format(serialnum))
                 return True
 
         return False
@@ -186,6 +201,14 @@ class Cycler():
 
         return value_list
 
+    def process_version(self, line):
+        if len(line) == 0:
+            return [-1]
+        
+        value_list = line.split(' ')
+
+        return value_list
+
     def process_sequence_data(self, line):
         pass
 
@@ -219,11 +242,14 @@ class Cycler():
             # Initialize serial device
             self.init(args.device)
             print('Cycler cycle mode running')
+            time.sleep(5)
 
             for stage, command in config[args.profile_name].items():
                 print("Stage: {} Command: {}".format(stage, command))
 
                 self.device.sendline(command.strip() + "\n")
+                
+                print("\033[2J",' ','')
 
                 try:
                     while self.device.is_connected():
@@ -234,11 +260,37 @@ class Cycler():
                         #
                         # check for serial data
                         # _______________
+                        print("\033[2J",' ','')
+                        self.print_ui_base()
                         for line in self.device.readlines():
                             if line:
                                 values = self.process_cycle_data(line)
-                                if values[0] in ['0']:
-                                    print("\033[1AStatus - Stage: {} V1: {}mV, I1: {}mA".format(stage, values[1], values[2]),' ','')
+                                if values[0] in ['0','4']:
+                                    if values[0] in ['4']: 
+                                        print("\033[23A\033[80D\033[66C\033[2B{}".format(serialnum),' ','')
+                                        print("\033[80D\033[66C{}".format(version),' ','')
+                                        print("\033[80D\033[66C{}°C".format(values[2]),' ','')
+                                        print("\033[80D\033[66C{}mV".format(values[1]),' ','')
+                                    if values[0] in ['0']: 
+                                        print("\033[23A\033[16B\033[80D\033[11C{}mV".format(values[1]),' ','')
+                                        print("\033[80D\033[11C{}mA".format(values[2]),' ','')
+                                        print("\033[80D\033[11C{}mAH".format(values[3]),' ','')
+                                        print("\033[80D\033[11C{}mWH".format(values[4]),' ','')
+                                        print("\033[80D\033[11C{}°C".format(values[5]),' ','')
+                                        if values[6] in ['1']:
+                                            print("\033[80D\033[11CDischarging",' ','')
+                                        if values[6] in ['2']:
+                                            print("\033[80D\033[11CEnd of Disc.",' ','')
+                                        if values[6] in ['3']:
+                                            print("\033[80D\033[11CCharging",' ','')
+                                        if values[6] in ['4','5']:
+                                            print("\033[80D\033[11CEnd of Charge",' ','')
+                                        if values[6] in ['6','7']:
+                                            print("\033[80D\033[11CIR Measure",' ','')
+                                        if values[6] in ['8']:
+                                            print("\033[80D\033[11CDone",' ','')
+                                        #print("\033[80D\033[80C\n")
+                                    #print("\033[1AStatus - Stage: {} V1: {}mV, I1: {}mA".format(stage, values[1], values[2]),' ','')
                                 #print("Stage: {}, Values: {}".format(stage, values))
                                 if values[0] in ['1', '6', '2', '7']:
                                     raise StageCompleted(stage)  # to next stage
@@ -316,6 +368,65 @@ class Cycler():
             self.disconnect()
             print()
             print("Shutdown completed")
+            
+    def print_ui_base(self):
+        #print("\033[25A",' ','')
+        print("\033[1A┌──────────────────────────────────────────────────────────────────────────────┐",' ','')
+        print("│ Database: ",' ','') 
+        print("\033[1A\033[80D\033[55C│ Cycler Status:",' ','')
+        print("\033[1A\033[80D\033[79C│",' ','')
+        print("│ Console:",' ','')
+        print("\033[1A\033[80D\033[55C│ Serial#:",' ','')
+        print("\033[1A\033[80D\033[79C│",' ','')
+        print("│",' ','')                   
+        print("\033[1A\033[80D\033[55C│ Version:",' ','')
+        print("\033[1A\033[80D\033[79C│",' ','')
+        print("│",' ','')                   
+        print("\033[1A\033[80D\033[55C│ HS Temp:",' ','')
+        print("\033[1A\033[80D\033[79C│",' ','')
+        print("│",' ','')       
+        print("\033[1A\033[80D\033[55C│ BufferV:",' ','')
+        print("\033[1A\033[80D\033[79C│",' ','')
+        print("│",' ','')
+        print("\033[1A\033[80D\033[55C│                       │",' ','')
+        print("│",' ','')
+        print("\033[1A\033[80D\033[55C│                       │",' ','')
+        print("│",' ','')
+        print("\033[1A\033[80D\033[55C│                       │",' ','')
+        print("│",' ','')
+        print("\033[1A\033[80D\033[55C│                       │",' ','')
+        print("│",' ','')
+        print("\033[1A\033[80D\033[55C│                       │",' ','')
+        print("│",' ','')
+        print("\033[1A\033[80D\033[55C│                       │",' ','')
+        print("│",' ','')
+        print("\033[1A\033[80D\033[55C│                       │",' ','')
+        print("│",' ','')
+        print("\033[1A\033[80D\033[55C│                       │",' ','')
+        print("│",' ','')
+        print("\033[1A\033[80D\033[55C│                       │",' ','')
+        print("│──────────────────────────────────────────────────────────────────────────────│",' ','')
+        print("│ Slot 1 Status                       / │ Slot 2 Status                      \\",' ','')
+        print("\033[1A\033[80D\033[79C│",' ','')
+        print("│ Voltage:",' ','')
+        print("\033[1A\033[80D\033[40C│ Voltage:",' ','')
+        print("\033[1A\033[80D\033[79C│",' ','')
+        print("│ Current:",' ','')
+        print("\033[1A\033[80D\033[40C│ Current:",' ','')
+        print("\033[1A\033[80D\033[79C│",' ','')
+        print("│ mAH    :",' ','')
+        print("\033[1A\033[80D\033[40C│ mAH    :",' ','')
+        print("\033[1A\033[80D\033[79C│",' ','')
+        print("│ mWH    :",' ','')
+        print("\033[1A\033[80D\033[40C│ mWH    :",' ','')
+        print("\033[1A\033[80D\033[79C│",' ','')
+        print("│ Temp   :",' ','')
+        print("\033[1A\033[80D\033[40C│ Temp   :",' ','')
+        print("\033[1A\033[80D\033[79C│",' ','')
+        print("│ Status :",' ','')
+        print("\033[1A\033[80D\033[40C│ Status :",' ','')
+        print("\033[1A\033[80D\033[79C│",' ','')
+        print("└──────────────────────────────────────────────────────────────────────────────┘",' ','')
 
 
 def setup_cmd_line():
