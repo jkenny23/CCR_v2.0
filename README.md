@@ -9,9 +9,5 @@ python cycler2sql_sequence.py profile -p profile_name
 (Deprecated):
 python cycler2sql_sequence.py sequence
 
-Prerequisites (install with python -m pip install <module name>):
-configparser
-future
-iso8601
-pyserial
-PyYAML
+Run the following to install prerequisite packages:
+python -m pip install configparser future iso8601 pyserial PyYAML colorama
