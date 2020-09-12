@@ -8,7 +8,7 @@ import configparser
 
 from mod_serial import usbSerial
 
-usb_dev = 'COM3'
+usb_dev = 'COM4'
 test_line = "d1 i1067 v2500"
 
 charge_cmd = 'c1 i6400 e1080'
@@ -16,9 +16,12 @@ wait_sec = 240
 get_status_cmd = 's'
 wait_cmd = 'c1 i1600 o400 e3600'
 discharge_cmd = 'd1 i1600 v2500'
+db_name = "cell_database"
+
 
 class StageCompleted(BaseException):
     pass
+
 
 class Cycler():
     def __init__(self):
@@ -27,11 +30,12 @@ class Cycler():
         # TODO total_cyclers hard coded
         self.total_cyclers = 2
 
-    def init(self):
+    def init(self, device=None):
+        print("COM port used:", device)
         while True:
             # Connect
             # ________
-            self.device = usbSerial(usb_dev)
+            self.device = usbSerial(device)
             try:
                 self.device.connect()
             except Exception as e:
@@ -106,10 +110,11 @@ class Cycler():
     def start_cycle(self, args):
         try:
             # Create tables if not don't exist, delete the .db file to create with new fields but you lose te data
-            self.create_tables()
+
+            self.create_tables(args.database)
 
             # Initialize serial device
-            self.init()
+            self.init(args.device)
             print('Cycler cycle mode running')
 
             self.device.sendline(args.testline + "\n")
@@ -117,7 +122,7 @@ class Cycler():
             while True:
                 if self.device is None:
                     print("Re-initializing lost comms")
-                    self.init()
+                    self.init(args.device)
 
                 #
                 # check for serial data
@@ -132,10 +137,14 @@ class Cycler():
             print()
             print("Shutdown completed")
 
-    def create_tables(self):
+    def create_tables(self, db_name):
 
-        self.conn = sqlite3.connect('cell_database.db')
+        if os.path.exists("{}.db".format(db_name)) is not True:
+            print("Creating new DB file: {}.db".format(db_name))
+
+        self.conn = sqlite3.connect(db_name + '.db')
         self.cur = self.conn.cursor()
+
 
         try:
             self.cur.execute('''CREATE TABLE cell_data
@@ -151,7 +160,7 @@ class Cycler():
         if value_list[0] in ['0', '1', '2', '5', '6', '7', '9']:
             try:
                 value_list.append(str(int(time.time())))
-                print('Recording to db: ', value_list)
+                #print('Recording to db: ', value_list)
                 self.cur.execute("INSERT INTO cell_data VALUES (?,?,?,?,?,?,?,?)", value_list)
             except Exception:
                 self.disconnect()
@@ -203,10 +212,10 @@ class Cycler():
 
         # Run commands in profile
         try:
-            self.create_tables()
+            self.create_tables(args.database)
 
             # Initialize serial device
-            self.init()
+            self.init(args.device)
             print('Cycler cycle mode running')
 
             for stage, command in config[args.profile_name].items():
@@ -218,7 +227,7 @@ class Cycler():
                     while self.device.is_connected():
                         if self.device.serial is None:
                             print("Re-initializing lost comms")
-                            self.init()
+                            self.init(args.device)
 
                         #
                         # check for serial data
@@ -226,6 +235,8 @@ class Cycler():
                         for line in self.device.readlines():
                             if line:
                                 values = self.process_cycle_data(line)
+                                #if values[0] in ['0']:
+                                #    print("Status - Stage: {} V1: {}mV, I1: {}mA".format(stage, values[1], values[2]),' ','')
                                 print("Stage: {}, Values: {}".format(stage, values))
                                 if values[0] in ['1', '6', '2', '7']:
                                     raise StageCompleted(stage)  # to next stage
@@ -245,17 +256,17 @@ class Cycler():
 
     def start_sequence(self, args):
         # Initialize serial device
-        self.init()
+        self.init(args.device)
         print('Cycler sequence mode running')
 
         try:
+            self.create_tables(args.database)
             for cycle_index in range(0, args.repeat):
                 # Create tables if not don't exist, delete the .db file to create with new fields but you lose te data
-                self.create_tables()
 
                 if self.device is None:
                     print("Re-initializing lost comms")
-                    self.init()
+                    self.init(args.device)
 
                 # Send Charge mode
                 self.device.sendline(charge_cmd + "\n")
@@ -314,6 +325,7 @@ def setup_cmd_line():
     single = subparser.add_parser('single', help='Normal cycler system')
     single.add_argument('-d', '--device', default=usb_dev, required=False, help='Com port of serial device')
     single.add_argument('-t', '--testline', default=test_line, required=False, help='Com port of serial device')
+    single.add_argument('-n', '--database', default=db_name, required=False, help='Database filename')
     single.set_defaults(func=Cycler().start_cycle)
 
     # Sequence Cycle
@@ -321,6 +333,7 @@ def setup_cmd_line():
     # sequence.add_argument('sequence', help='Specify the service for which logs should be fetched')
     sequence.add_argument('-d', '--device', default=usb_dev, required=False, help='Com port of serial device')
     sequence.add_argument('-r', '--repeat', default=1, required=False, help='Number of charge/discharge cycles to run')
+    sequence.add_argument('-n', '--database', default=db_name, required=False, help='Database filename')
     sequence.add_argument('-w', '--wait', default=wait_sec, required=False,
                           help='Number of seconds to sleep between charge and discharge cycle')
 
@@ -328,8 +341,11 @@ def setup_cmd_line():
 
     # Normal Cycle
     profile = subparser.add_parser('profile', help='Profile sequence command set')
+    profile.add_argument('-d', '--device', default=usb_dev, required=False, help='Com port of serial device')
+    profile.add_argument('-n', '--database', default=db_name, required=False, help='Database filename')
     profile.add_argument('-p', '--profile', dest='profile_name', default=None, required=True,
                          help='Profile name defined in profiles.ini')
+
     profile.set_defaults(func=Cycler().start_profile)
 
     if len(sys.argv[1:]) == 0:
